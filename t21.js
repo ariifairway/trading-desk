@@ -3,7 +3,7 @@
 // Data: t21.json (live + backtest summary, data branch on GitHub with local fallback), t21_bt.json (daily backtest curves) and t21_tr_Sxx.json (backtest trades; loaded on demand).
 (function () {
 "use strict";
-const VER = "20261029b", RAW = "https://raw.githubusercontent.com/ariifairway/trading-desk/data/";
+const VER = "20261029c", RAW = "https://raw.githubusercontent.com/ariifairway/trading-desk/data/";
 const LOCAL = location.hostname === "127.0.0.1" || location.hostname === "localhost";
 let D = null, err = null, BT = null, btErr = null; const TRS = {}, TRERR = {}; const CH = [];
 const S = { sel: "S11", cmb: "c01", month: null, page: 0, scroll: false };
@@ -106,6 +106,32 @@ function render(v, H) {
   });
   v.appendChild(h("section", { class: "card hl" }, h("h2", null, "★ Best strategies (the " + top.length + " profitable after costs)"), h("p", { class: "cap" }, "Ranked by backtest profit at 0.01% cost per side, January 2024 to 28 October 2026. All of them trade live in practice right now."), best));
   v.appendChild(callout("Honest summary: only " + top.length + " of the 21 made money in the backtest once a small trading cost (0.01% per side) is counted. S11 is the best, but all its profit came from short trades and it is the best of 21 tested, so part of it may be luck. The live accounts trade at zero cost, so their balances look better than a real account would. The next weeks of live trading are the real test."));
+  // ---- YOUR RULES comparison (-30 / +45 / lock +1 at +20) vs the current rules: live balances (separate EUR500 accounts) + backtest
+  try {
+    const U = D.userrules, UL = U && U.live, UB = U && U.bt;
+    if (UL && UB) {
+      const ul = (id) => (UL.strategies || []).find((q) => q.id === id), tot = UL.totals || {}, curTot = (L.strategies || []).reduce((a, q) => a + q.pnl, 0);
+      const order = strategies.slice().sort((a, b) => ((UB[b.id] ? UB[b.id].user["0.0001"].total : 0) - (UB[a.id] ? UB[a.id].user["0.0001"].total : 0)));
+      const urows = order.map((x) => {
+        const c = liveOf(x.id), u = ul(x.id), b = UB[x.id]; if (!b) return null;
+        const cell = (q) => (q ? { t: money(q.balance, 2) + (q.open ? " ●" : ""), cls: tn(q.balance - 500) } : { t: "–", cls: "mut" });
+        const bt = (o, k) => ({ t: smoney(o[k].total), cls: tn(o[k].total) });
+        return [h("span", null, h("b", null, x.id), " ", x.name.slice(0, 26)), cell(c), cell(u), bt(b.cur, "0.0001"), bt(b.user, "0.0001"), bt(b.cur, "0.0"), bt(b.user, "0.0")];
+      }).filter(Boolean);
+      const sumBt = (k, c) => Object.values(UB).reduce((a, o) => a + o[k][c].total, 0), nPos = (k, c) => Object.values(UB).filter((o) => o[k][c].total > 0).length;
+      v.appendChild(h("section", { class: "card hl2", id: "t21-userrules" }, h("h2", null, "Your rules (−€30 / +€45 / lock +€1 at +€20) vs the current rules"),
+        h("p", { class: "cap" }, "Same entries, different exits. Your rules: about €10,000 per trade, stop −0.30% (−€30), target +0.45% (+€45), once +€20 is reached the stop moves to +€1, 60 min max. Both sets run live on separate €500 practice accounts (zero cost) since " + (UL.started_utc ? fmtMad(UL.started_utc) : "29 Oct") + ". Today's earlier trades were replayed from the minute bars, like the current set."),
+        h("div", { class: "grid g4" },
+          metric(smoney(curTot, 2), "Live total, current rules", "all 21, since 29 Oct", tn(curTot)),
+          metric(smoney(tot.pnl, 2), "Live total, your rules", (tot.trades || 0) + " trades, " + (tot.open_positions || 0) + " open", tn(tot.pnl)),
+          metric(smoney(sumBt("cur", "0.0001")), "Backtest, current rules, 0.01% cost", nPos("cur", "0.0001") + " of 21 profitable", tn(sumBt("cur", "0.0001"))),
+          metric(smoney(sumBt("user", "0.0001")), "Backtest, your rules, 0.01% cost", nPos("user", "0.0001") + " of 21 profitable", tn(sumBt("user", "0.0001")))),
+        h("p", { class: "cap", style: "margin-top:10px" }, "Backtest 2 Jan 2024 – 28 Oct 2026, fixed €10,000 per trade, sorted by your rules at 0.01%. ● = open trade right now. Live balance starts at €500."),
+        h("div", { class: "tw" }, h("table", { class: "t21t" }, h("thead", null, h("tr", null, ["Strategy", "Live: current", "Live: yours", "0.01%: current", "0.01%: yours", "Zero cost: current", "Zero cost: yours"].map((c, i) => h("th", { class: i ? "n" : "" }, c)))),
+          h("tbody", null, urows.map((r) => h("tr", null, r.map((c, i) => (i === 0 ? h("td", { class: "namecell" }, c) : h("td", { class: "n " + (c.cls || "") }, c.t)))))))),
+        h("p", { class: "cap" }, "Verdict so far: your rules do worse than the current ones in the backtest (the \"+€1 lock\" closes many trades that would later reach the target). We are letting them run live next to each other so both are tested on the same real prices.")));
+    }
+  } catch (e) { v.appendChild(h("p", { class: "mut" }, "Your-rules comparison error: " + e.message)); }
   // ---- combined chart
   const ccard = h("section", { class: "card" }, h("h2", null, "Top " + top.length + " together, January 2024 to today"),
     h("p", { class: "cap" }, "Cumulative profit in € (fixed €25 risk per trade). The thick line after the dashed marker is the live practice (zero cost) continuing from the backtest."),
