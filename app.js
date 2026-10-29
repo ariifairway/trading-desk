@@ -52,6 +52,7 @@ function callout(text, kind) { return h("div", { class: "callout " + (kind || ""
 let LIVE = null, ST = null, liveErr = null, lastFetchOk = 0;
 const state = { tab: "overview", cost: "0.01%" };
 const TABS = [["overview", "Overview"], ["bots", "Live bots"], ["replay", "Backtest replay 2024–now"], ["robust", "Robustness tests"], ["mc", "Monte Carlo"], ["log", "Research log"], ["rules", "Rules"]];
+TABS.push(["t21", "Nasdaq 21"]);   // module: t21.js
 
 function marketInfo() {
   try {
@@ -89,7 +90,7 @@ function render() {
   if (RP.playing && state.tab !== "replay") stopPlay();
   const v = document.getElementById("view"); v.innerHTML = "";
   if (!ST || !LIVE) { v.appendChild(card(null, null, h("p", null, liveErr ? "Could not load data: " + liveErr : "Loading data…"))); return; }
-  const fn = { overview, bots, replay, robust, mc, log, rules }[state.tab]; fn(v);
+  const fn = { overview, bots, replay, robust, mc, log, rules, t21: (vv) => (window.T21 ? window.T21.render(vv, { h, table, card, metric, callout, pill, fmtEur0, sgn, tone }) : vv.appendChild(card("Nasdaq 21", null, h("p", null, "Module not loaded")))) }[state.tab]; fn(v);
 }
 function costSwitch() { return seg(["0.01%", "0.02%"], state.cost, (c) => { state.cost = c; if (state.tab === "replay") { RP.rowsDirty = true; } render(); }); }
 
