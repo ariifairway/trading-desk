@@ -53,6 +53,16 @@ const RULES = {
     { label: "News", value: "No entries from 65 minutes before to 30 minutes after big releases" },
     { label: "Account brake", value: "None, so trades keep accumulating" },
   ],
+  V: [
+    { label: "Market", value: "Nasdaq-100 only (QQQ as the practice proxy)" },
+    { label: "Setup", value: "Fade of a 5-minute stretch: when the last 5 minutes moved by at least 0.3 of the market's normal minute-by-minute noise (average of the last 30 minutes), trade against the move (about 50 signals a day)" },
+    { label: "Exit", value: "Fixed stop 0.25% from entry, no profit target, otherwise closed after 5 minutes" },
+    { label: "Risk per trade", value: "€25 (€10,000 size, capped at 20× the account)" },
+    { label: "Entries", value: "From 10:01 to 15:45 New York time, one position at a time, no limit on trades per day" },
+    { label: "Daily stop", value: "None (you lifted it for V); no new trades only if the account falls below €50" },
+    { label: "Costs", value: "Ignored (0%), by request. At 0.01% per side the backtest loses about €1.77 per trade" },
+    { label: "News", value: "No entries from 65 minutes before to 30 minutes after big releases; open trade closed 2 minutes before" },
+  ],
   P: [
     { label: "Setup", value: "Takes the signals of A, B and C; when two fire in the same minute, B comes before A before C" },
     { label: "Risk per trade", value: "€25, cut when a correlated position is open so the combined risk stays within €37.5 (S&P 500 and Nasdaq-100 move together at 0.95, gold at about 0.2 with both); a trade below €5 of risk is skipped" },

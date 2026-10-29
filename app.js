@@ -95,21 +95,22 @@ function costSwitch() { return seg(["0.01%", "0.02%"], state.cost, (c) => { stat
 
 // ---------- Overview
 function overview(v) {
-  const T = LIVE.tracks, abc = T.filter((t) => t.key !== "P"), P = T.find((t) => t.key === "P"), mk = marketInfo();
+  const T = LIVE.tracks, abc = T.filter((t) => "ABC".includes(t.key)), P = T.find((t) => t.key === "P"), VV = T.find((t) => t.key === "V"), mk = marketInfo();
   const totBal = abc.reduce((s, t) => s + t.balance, 0), totStart = abc.reduce((s, t) => s + t.start, 0), day = abc.reduce((s, t) => s + t.day.pnl, 0), nOpen = abc.reduce((s, t) => s + t.open.length, 0);
-  const halted = T.filter((t) => t.day.halted || t.day.losses >= 3 || t.day.pnl <= -75).map((t) => t.key);
+  const halted = T.filter((t) => t.key !== "V").filter((t) => t.day.halted || t.day.losses >= 3 || t.day.pnl <= -75).map((t) => t.key);
   const g = h("div", { class: "grid g4" },
     metric(fmtEur(totBal), "Balance A + B + C", sgn(totBal - totStart) + " since start (" + fmtEur0(totStart) + ")", tone(totBal - totStart)),
     metric(sgn(day), "Today A + B + C", "Portfolio P today " + sgn(P.day.pnl), tone(day)),
     metric(String(nOpen), "Open positions", "Portfolio P holds " + P.open.length),
     metric(P.day.trades + " of 10", "Portfolio trades today", "Cap 10 a day; A " + abc[0].day.trades + ", B " + abc[1].day.trades + ", C " + abc[2].day.trades),
     metric(halted.length ? "Hit: " + halted.join(", ") : "Not hit", "Daily stop (−€75 or 3 losses)", halted.length ? "No new trades there today" : "All four accounts can trade", halted.length ? "neg" : "pos"),
+    VV ? metric(VV.day.trades + " trades", "V scalper today", (VV.day.wins || 0) + " wins, " + VV.day.losses + " losses, " + sgn(VV.day.pnl) + " · balance " + fmtEur(VV.balance), tone(VV.day.pnl)) : metric("–", "V scalper", ""),
     metric(mk.value, "US stock market", mk.detail, mk.open ? "pos" : ""),
     metric(LIVE.last_check_madrid ? LIVE.last_check_madrid.split(", ")[1] : "–", "Last check (Madrid)", LIVE.last_check_madrid ? LIVE.last_check_madrid.split(", ")[0] : ""));
-  v.appendChild(card("Right now", "Three independent €500 practice accounts (A, B, C) plus the portfolio P, which re-uses their signals, so its trades are not extra capital.", g,
+  v.appendChild(card("Right now", "Three independent €500 practice accounts (A, B, C) plus the portfolio P, which re-uses their signals, so its trades are not extra capital. Track V (Nasdaq-100 volume scalper, ~50 trades a day, no costs) has its own €500 account and is shown separately.", g,
     callout("The portfolio is not better than its parts in the 2024–2026 tests: +€306 against +€409 for A alone and +€323 for B alone at 0.01% cost, with a €571 drawdown, and −€500 at 0.02%. Nothing here has passed all six validation gates. Real orders are placed only after you approve each one.")));
   const eq = LIVE.equity;
-  if (eq.length >= 2) { const box = h("div", { class: "chartbox", style: "height:280px" }); const cv = h("canvas"); box.appendChild(cv); v.appendChild(card("Live equity", "Balance of each practice account per day (closed-trade results; C and P started on 29 Oct, so they sit at €500 before that).", box)); lineChart(cv, eq.map((r) => r.d.slice(5)), [["A v5.4", eq.map((r) => r.A)], ["B L7", eq.map((r) => r.B)], ["C BK3", eq.map((r) => r.C)], ["P portfolio", eq.map((r) => r.P)]], (x) => "€" + x.toFixed(0)); }
+  if (eq.length >= 2) { const box = h("div", { class: "chartbox", style: "height:280px" }); const cv = h("canvas"); box.appendChild(cv); v.appendChild(card("Live equity", "Balance of each practice account per day (closed-trade results; C, P and V started on 29 Oct, so they sit at €500 before that).", box)); lineChart(cv, eq.map((r) => r.d.slice(5)), [["A v5.4", eq.map((r) => r.A)], ["B L7", eq.map((r) => r.B)], ["C BK3", eq.map((r) => r.C)], ["P portfolio", eq.map((r) => r.P)], ["V scalper", eq.map((r) => r.V)]], (x) => "€" + x.toFixed(0)); }
   const V = ST.variants["0.01%"], vr = (n) => V.find((r) => r[0] === n);
   const gt = ST.gates["0.01%"];
   const sc = [["A — v5.4", vr("A alone"), gt[0].n + " of 6", "Profitable in the test, but luck cannot be ruled out and it had a long losing stretch in 2024"], ["B — L7", vr("B alone"), gt[1].n + " of 6", "Best-looking, but only 76 trades in 34 months"], ["C — breakout mix", vr("C alone"), gt[2].n + " of 6", "Plenty of trades, about zero edge; loses everything at 0.02% cost"], ["P — portfolio", vr("P = A+B+C"), "not tested", "Mostly C, so deeper drawdowns than A or B and no better profit"]];
@@ -127,7 +128,7 @@ function overview(v) {
 }
 
 function lineChart(cv, labels, series, fmt, opts) {
-  opts = opts || {}; const cols = [css("--blue"), css("--green"), css("--amber"), css("--red")];
+  opts = opts || {}; const cols = [css("--blue"), css("--green"), css("--amber"), css("--red"), "#b48cff"];
   new Chart(cv, { type: "line", data: { labels, datasets: series.map((s, i) => ({ label: s[0], data: s[1], borderColor: cols[i], backgroundColor: cols[i], borderWidth: 2, pointRadius: labels.length < 12 ? 3 : 0, tension: 0.15 })) },
     options: { responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
       plugins: { legend: { labels: { color: css("--muted") } }, tooltip: { callbacks: { label: (c) => c.dataset.label + ": " + fmt(c.parsed.y) } } },
@@ -144,22 +145,22 @@ function bots(v) {
   const T = LIVE.tracks, mk = marketInfo();
   const cards = h("div", { class: "grid g2" });
   T.forEach((t) => {
-    const hit = t.day.halted || t.day.losses >= 3 || t.day.pnl <= -75; const winrate = t.total_trades ? Math.round((100 * t.wins) / t.total_trades) + "%" : "0 trades";
+    const hit = t.key !== "V" && (t.day.halted || t.day.losses >= 3 || t.day.pnl <= -75); const winrate = t.total_trades ? Math.round((100 * t.wins) / t.total_trades) + "%" : "0 trades";
     const c = card(t.name, t.status + (t.total_trades ? "." : "."));
     c.appendChild(h("div", { class: "grid g4" }, metric(fmtEur(t.balance), "Balance", sgn(t.balance - t.start) + " since start", tone(t.balance - t.start)),
       metric(sgn(t.day.pnl), "Today", t.open.length ? "Open trade " + (t.open_pnl ? sgn(t.open_pnl) : "running") : "No open trade", tone(t.day.pnl)),
-      metric(t.day.trades + " of 10", "Trades today", t.day.losses + " of 3 losses"), metric(winrate, "Win rate", t.total_trades ? t.wins + " of " + t.total_trades + " closed trades" : "no closed trades yet")));
-    c.appendChild(props([{ label: "Daily stop", value: pill(hit ? "Hit, no more trades today" : "Not hit", hit ? "bad" : "ok") },
+      t.key === "V" ? metric(String(t.day.trades), "Trades today", (t.day.wins || 0) + " wins, " + t.day.losses + " losses · no cap") : metric(t.day.trades + " of 10", "Trades today", t.day.losses + " of 3 losses"), metric(winrate, "Win rate", t.total_trades ? t.wins + " of " + t.total_trades + " closed trades" : "no closed trades yet")));
+    c.appendChild(props([{ label: "Daily stop", value: t.key === "V" ? pill("None (lifted for V)", "neu") : pill(hit ? "Hit, no more trades today" : "Not hit", hit ? "bad" : "ok") },
       { label: "Open trade", value: t.open.length ? t.open[0].side + " " + t.open[0].market + " at " + t.open[0].entry : "None" }, { label: "Account started", value: t.start_date || "–" }]));
     if (t.recent.length) c.appendChild(table(["Closed", "Market", "Side", "Entry → exit", "Result"], t.recent.slice(0, 3).map((r) => [r.time, r.market, r.side, r.entry + " → " + r.exit + " (" + r.why + ")", { t: sgn(r.pnl), cls: tone(r.pnl) }]), { num: [4] }));
     cards.appendChild(c);
   });
-  v.appendChild(card("Trading bots", "Each bot has its own €500 practice account. P re-uses the signals of A, B and C under shared risk rules."));
+  v.appendChild(card("Trading bots", "Each bot has its own €500 practice account. P re-uses the signals of A, B and C under shared risk rules. V trades only the Nasdaq-100, about 50 times a day, with costs ignored (so its results are not comparable with the others)."));
   v.lastChild.appendChild(cards);
   if (LIVE.benchmark && LIVE.benchmark.value_eur != null) v.lastChild.appendChild(h("p", { class: "small" }, "Hold-a-third-each benchmark (never traded, from the 27 Oct US open): " + fmtEur(LIVE.benchmark.value_eur) + " (" + sgn(LIVE.benchmark.value_eur - 500) + ")."));
   const open = T.flatMap((t) => t.open.map((o) => [t.key + (o.src ? " ← " + o.src : ""), o.market, o.side, o.entry, o.stop == null ? "–" : o.stop, o.target == null ? "–" : o.target, o.since || "–", o.until || "–"]));
   if (open.length) v.appendChild(card("Open trades", null, table(["Bot", "Market", "Side", "Entry", "Stop", "Target", "Opened", "Time exit by"], open, { num: [3, 4, 5] })));
-  const closed = T.flatMap((t) => t.recent.map((r) => [t.key + (r.src ? " ← " + r.src : ""), r.time, r.market, r.side, r.entry || "–", r.exit, r.why, { t: sgn(r.pnl), cls: tone(r.pnl) }]));
+  const closed = T.flatMap((t) => t.recent.slice(0, t.key === "V" ? 5 : 8).map((r) => [t.key + (r.src ? " ← " + r.src : ""), r.time, r.market, r.side, r.entry || "–", r.exit, r.why, { t: sgn(r.pnl), cls: tone(r.pnl) }]));
   v.appendChild(card("Recent closed trades", "Whole trades only (a partial exit counts when the trade finishes). Results are the practice accounts' shadow P&L in euros.",
     closed.length ? table(["Bot", "Closed", "Market", "Side", "Entry", "Exit", "Reason", "Result"], closed, { num: [4, 5, 7] }) : h("p", { class: "mut" }, "No closed trades yet on these accounts.")));
   if (LIVE.skipped.length) v.appendChild(card("Signals the portfolio skipped", null, table(["Time", "Bot", "Market", "Side", "Why skipped"], LIVE.skipped.map((s) => [s.time, s.track, s.market, s.side, s.reason]))));
@@ -180,7 +181,8 @@ function computeRows() {
   RP.rows = out; RP.rowsDirty = false;
 }
 function stopPlay() { RP.playing = false; if (RP.timer) clearInterval(RP.timer); RP.timer = null; }
-function replay(v) {
+function replay(v) { vBacktest(v); replayMain(v); }
+function replayMain(v) {
   if (RP.rowsDirty || RP.lastCost !== state.cost) { computeRows(); RP.lastCost = state.cost; RP.k = RP.rows.length; RP.page = 0; }
   const n = () => RP.rows.length;
   const chart = makeChart();
@@ -314,6 +316,25 @@ function log(v) {
     { label: "Real trading costs", value: "The spread and fees at the real broker are not measured yet (no demo login). The 0.01% and 0.02% costs on this site are assumptions, and they decide whether C and P can work at all." },
     { label: "Forward test", value: "Only a few live days exist so far. The next score of A, B, C and P comes after the 29 Oct US close." },
     { label: "Real orders", value: "None placed. A real trade needs your approval of each order after the desk's review." }])));
+}
+
+
+// ---------- Track V backtest (summary + weekly equity; the 35,000 individual trades are not shipped to the page)
+function vBacktest(v) {
+  const B = ST.v_backtest; if (!B) return;
+  const z = B.stats["0"], c1 = B.stats["0.0001"], c2 = B.stats["0.0002"], lv = B.stats["live0"];
+  const box = h("div", { class: "chartbox", style: "height:260px" }), cv = h("canvas"); box.appendChild(cv);
+  const w0 = B.curves["0"].weeks;
+  const yr = Object.entries(z.by_year).map(([y, a]) => [y, px(a.n).replace(".00", ""), { t: fmtEur0(a.net), cls: tone(a.net) }, a.win + "%"]);
+  const c = card("Track V — Nasdaq-100 volume scalper (backtest, no costs)", "Jan 2024 to 27 Oct 2026, the live code replayed on Nasdaq-100 minute data (USATECH, Dukascopy), fixed €10,000 size (€25 risk), news blackout on. Practice only.",
+    h("div", { class: "grid g4" }, metric(z.per_day + " a day", "Trades", z.n.toLocaleString("en") + " in " + z.days + " days"), metric(sgn(z.net), "Profit with zero costs", "€" + z.avg.toFixed(2) + " per trade (±" + z.se.toFixed(2) + ")", tone(z.net)),
+      metric(z.win + "%", "Win rate", "Months positive " + z.months_pos), metric("€" + z.dd, "Worst drawdown", "More than the €500 account", "neg")));
+  c.appendChild(box);
+  c.appendChild(table(["Year", "Trades", "Result, zero costs", "Win rate"], yr, { num: [1, 2, 3] }));
+  c.appendChild(callout("Costs decide everything for a bot like this. At the 0.01% per side used for the other bots the same trades lose " + fmtEur0(c1.net) + " (about €" + Math.abs(c1.avg).toFixed(2) + " per trade, win rate " + c1.win + "%), and at 0.02% they lose " + fmtEur0(c2.net) + ". The zero-cost profit is only €" + z.avg.toFixed(2) + " per trade, about " + (z.avg / z.se).toFixed(1) + " standard errors from zero, chosen among 640 variants, so it is not proof of an edge."));
+  c.appendChild(callout("With the real account rules (size follows equity, trading stops below €50), the zero-cost run on this history hits the €50 floor after " + lv.days + " trading days in 2024 (" + fmtEur0(lv.net) + "). The drawdown of €" + z.dd + " is larger than the €500 account.", "info"));
+  v.appendChild(c);
+  lineChart(cv, w0.map((w) => w.slice(2)), [["Zero costs", B.curves["0"].eq], ["0.01% per side (cut off at −€2,000)", B.curves["0.0001"].eq.map((x) => Math.max(x, -2000))]], (x) => fmtEur0(x));
 }
 
 // ---------- Rules
