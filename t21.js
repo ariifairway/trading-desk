@@ -3,7 +3,7 @@
 // Data: t21.json (live + backtest summary, data branch on GitHub with local fallback), t21_bt.json (daily backtest curves) and t21_tr_Sxx.json (backtest trades; loaded on demand).
 (function () {
 "use strict";
-const VER = "20261029e", RAW = "https://raw.githubusercontent.com/ariifairway/trading-desk/data/";
+const VER = "20261029f", RAW = "https://raw.githubusercontent.com/ariifairway/trading-desk/data/";
 const LOCAL = location.hostname === "127.0.0.1" || location.hostname === "localhost";
 let D = null, err = null, BT = null, btErr = null, FU = null, FUerr = null, FC = null, FCerr = null; const TRS = {}, TRERR = {}; const CH = [];
 const S = { sel: "S11", cmb: "c01", month: null, page: 0, scroll: false };
@@ -15,15 +15,17 @@ async function load() {
 }
 async function loadFU() { const t = Math.floor(Date.now() / 60000); try { const j = await getJ(LOCAL ? ["data/t21fut.json?t=" + t] : [RAW + "t21fut.json?t=" + t, "data/t21fut.json?t=" + t]); if (!(FU && Date.parse(j.generated_utc) < Date.parse(FU.generated_utc))) FU = j; FUerr = null; } catch (x) { FUerr = String(x && x.message || x); } }
 async function loadFC() { if (FC) return; try { FC = await getJ(["data/equity_curves_fixed.json?v=" + VER, RAW + "equity_curves_fixed.json?v=" + VER]); FCerr = null; } catch (x) { FCerr = String(x && x.message || x); } }
+let MC = null, MCerr = null;
+async function loadMC() { const t = Math.floor(Date.now() / 60000); try { const r = await getJ(LOCAL ? ["data/mc2026.json?t=" + t] : [RAW + "mc2026.json?t=" + t, "data/mc2026.json?t=" + t]); MC = r; MCerr = null; } catch (x) { MCerr = String(x && x.message || x); } }
 async function loadBT() { if (BT) return; try { BT = await getJ(["data/t21_bt.json?v=" + VER, RAW + "t21_bt.json?v=" + VER]); btErr = null; } catch (x) { btErr = String(x && x.message || x); } }
 async function loadTR(id) { if (TRS[id]) return; try { TRS[id] = await getJ(["data/t21_tr_" + id + ".json?v=" + VER, RAW + "t21_tr_" + id + ".json?v=" + VER]); delete TRERR[id]; } catch (x) { TRERR[id] = String(x && x.message || x); } }
 let busy = false;
 function rerender() {
   if (!window.__t21On || !window.__t21H) return; const v = document.getElementById("view"); if (!v) return;
-  const y = window.scrollY; CH.splice(0).forEach((c) => { try { c.destroy(); } catch (e) {} }); v.innerHTML = ""; window.T21.render(v, window.__t21H); window.scrollTo(0, y);
+  const y = window.scrollY; CH.splice(0).forEach((c) => { try { c.destroy(); } catch (e) {} }); v.innerHTML = ""; (window.__t21Mode === "outlook" ? window.T21.renderOutlook : window.T21.render)(v, window.__t21H); window.scrollTo(0, y);
   if (S.scroll) { S.scroll = false; const el = document.getElementById("t21-detail"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }
 }
-async function tick() { const a = document.activeElement; if (a && (a.tagName === "SELECT" || a.tagName === "INPUT")) return; await Promise.all([load(), loadFU()]); rerender(); }
+async function tick() { const a = document.activeElement; if (a && (a.tagName === "SELECT" || a.tagName === "INPUT")) return; await Promise.all([load(), loadFU(), window.__t21Mode === "outlook" ? loadMC() : null]); rerender(); }
 setInterval(tick, 60000);
 const MAD = (() => { try { return new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Madrid", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false }); } catch (e) { return null; } })();
 const fmtMad = (iso) => { try { return MAD.format(new Date(iso)).replace(",", "") + " Madrid"; } catch (e) { return iso; } };
@@ -266,6 +268,72 @@ function render(v, H) {
   v.appendChild(det);
   v.appendChild(h("p", { class: "mut", style: "font-size:12.5px" }, "Data file generated " + fmtMad(D.generated_utc) + ". Practice only: simulated accounts, no broker, no real order is ever placed."));
 }
-window.T21 = { render, load, refresh: tick };
+
+// ---- "2026 outlook" tab: Monte Carlo fan chart of the EUR5,000 combined futures account to 31 Dec 2026 (data/mc2026.json, written by another worker, refreshed every ~60 s)
+function renderOutlook(v, H) {
+  window.__t21H = H; const { h, table, card, metric, callout, pill } = H; const num = (x) => (typeof x === "number" && isFinite(x));
+  if (!MC && !MCerr) { loadMC().then(rerender); }
+  v.appendChild(h("section", { class: "card topcard" }, h("h2", null, "2026 outlook: where could the €5,000 futures account end the year?"),
+    h("p", { class: "cap", style: "margin:4px 0 0" }, "Simulation, not a forecast. Thousands of random re-orderings of the strategies' past trades are replayed to 31 December 2026. It shows the range of outcomes the backtest edge could give, including bad luck. The real edge may be smaller, so treat the middle line as a hopeful case, not a promise. No broker, no real order.")));
+  if (!MC) { v.appendChild(card(null, null, h("p", { class: "mut" }, MCerr ? "The outlook data is not published yet (" + MCerr + "). It appears here as soon as the simulation starts; this page checks every minute." : "Loading…"))); return; }
+  const M = MC, run = M.status === "running", pd = num(M.paths_done) ? M.paths_done : null, pt = num(M.paths_total) ? M.paths_total : null, pct = pd != null && pt ? Math.min(100, Math.round(100 * pd / pt)) : (M.status === "done" ? 100 : 0);
+  const upd = M.updated ? fmtMad(M.updated) : "–";
+  v.appendChild(h("section", { class: "card hl2" }, h("div", { class: "row", style: "justify-content:space-between" }, h("b", null, run ? "Simulation running…" : M.status === "done" ? "Simulation finished" : "Status: " + (M.status || "unknown")), pill(run ? "running" : M.status === "done" ? "done" : "?", run ? "warn" : "ok")),
+    h("div", { style: "background:var(--panel2);border:1px solid var(--border);border-radius:999px;height:14px;overflow:hidden;margin:8px 0" }, h("div", { style: "height:100%;width:" + pct + "%;background:" + (run ? "var(--amber)" : "var(--green)") }) ),
+    h("div", { class: "small mut" }, pct + "%" + (pd != null && pt ? " · " + pd.toLocaleString("en-US") + " of " + pt.toLocaleString("en-US") + " random paths" : "") + (M.stage ? " · " + M.stage : "") + " · updated " + upd + (run ? " · refreshes every minute; the picture below is a preview and moves as more paths finish" : ""))));
+  // ---- fan chart
+  const cb = M.combined;
+  if (cb && Array.isArray(cb.dates) && cb.dates.length && Array.isArray(cb.p50)) {
+    const last = (a) => (Array.isArray(a) ? a[a.length - 1] : null);
+    v.appendChild(h("div", { class: "grid g4" },
+      metric(money(last(cb.p50), 0), "Middle outcome (median) at 31 Dec 2026", "from €5,000 today", num(last(cb.p50)) ? tn(last(cb.p50) - 5000) : ""),
+      metric(money(last(cb.p5), 0), "Bad case (worst 5%)", "95 of 100 paths end above this", num(last(cb.p5)) ? tn(last(cb.p5) - 5000) : ""),
+      metric(money(last(cb.p95), 0), "Good case (best 5%)", "5 of 100 paths end above this", num(last(cb.p95)) ? tn(last(cb.p95) - 5000) : ""),
+      metric(num(last(cb.p25)) && num(last(cb.p75)) ? money(last(cb.p25), 0) + " – " + money(last(cb.p75), 0) : "–", "Middle half of outcomes", "25th to 75th percentile")));
+    const fcard = h("section", { class: "card" }, h("h2", null, "Fan chart: €5,000 combined account to 31 December 2026"), h("p", { class: "cap" }, "Simulation, not a forecast. Dark line = median; shaded bands = middle 50% and middle 90% of simulated paths."));
+    const cbx = chartBox(h, 320); fcard.appendChild(cbx); v.appendChild(fcard);
+    try {
+      const cv = document.createElement("canvas"); cbx.appendChild(cv); const muted = "#8d9aab", L = cb.dates; const ser = (a) => (Array.isArray(a) ? a : []);
+      const mk = (label, data, color, w, fill, dash) => ({ label, data: ser(data), borderColor: color, backgroundColor: fill || color, borderWidth: w, pointRadius: 0, tension: 0.1, fill: fill ? "-1" : false, borderDash: dash || [] });
+      const ds = [mk("Worst 5%", cb.p5, "rgba(240,96,90,.7)", 1, null, [4, 3]), mk("25%", cb.p25, "rgba(90,169,255,.5)", 1, "rgba(90,169,255,.12)"), mk("Median", cb.p50, "#3fb97a", 2.6), mk("75%", cb.p75, "rgba(90,169,255,.5)", 1, "rgba(90,169,255,.12)"), mk("Best 5%", cb.p95, "rgba(63,185,122,.7)", 1, null, [4, 3])];
+      // fill between p25..p75 only: dataset order p5, p25, median, p75, p95; "-1" fill on p25 would fill to p5; use explicit targets instead
+      ds[1].fill = false; ds[3].fill = 1;
+      ds.push({ label: "€5,000 start", data: L.map(() => 5000), borderColor: "rgba(255,255,255,.25)", borderWidth: 1, pointRadius: 0, borderDash: [2, 4] });
+      CH.push(new Chart(cv, { type: "line", data: { labels: L, datasets: ds }, options: { responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
+        plugins: { legend: { labels: { color: muted, boxWidth: 12, filter: (i) => i.text !== "25%" && i.text !== "75%" } }, tooltip: { callbacks: { title: (it) => dlabel(it[0].label), label: (it) => it.dataset.label + ": " + money(it.parsed.y, 0) } } },
+        scales: { x: { ticks: { color: muted, maxTicksLimit: 6, autoSkip: true, maxRotation: 0, callback(vv) { const l = this.getLabelForValue(vv); return l.slice(8) + " " + MONTHS[parseInt(l.slice(5, 7), 10) - 1]; } }, grid: { color: "rgba(255,255,255,.05)" } }, y: { ticks: { color: muted, callback: (x) => money(x, 0) }, grid: { color: "rgba(255,255,255,.07)" } } } } }));
+    } catch (e) { cbx.textContent = "Chart error: " + e.message; }
+  } else v.appendChild(card("Fan chart", null, h("p", { class: "mut" }, "The fan chart appears once the first paths are finished.")));
+  // ---- per strategy
+  const ps = Array.isArray(M.per_strategy) ? M.per_strategy : [];
+  if (ps.length) {
+    const rows = ps.map((x) => [h("span", null, h("b", null, x.id || "?"), " ", String(x.name || "").replace(/ \(.*$/, "")), { t: money(x.p5, 0) }, { t: money(x.p25, 0) }, { t: money(x.p50, 0), cls: num(x.p50) ? tn(x.p50 - 5000) : "" }, { t: money(x.p75, 0) }, { t: money(x.p95, 0) }, { t: num(x.chance_profit) ? (x.chance_profit <= 1 ? Math.round(x.chance_profit * 100) : Math.round(x.chance_profit)) + "%" : "–" }, { t: num(x.win_rate) ? (x.win_rate <= 1 ? (x.win_rate * 100).toFixed(0) : x.win_rate.toFixed(0)) + "%" : "–" }, { t: num(x.trades) ? Math.round(x.trades).toLocaleString("en-US") : "–" }]);
+    v.appendChild(card("Each strategy on its own €5,000 account, end of 2026", "Simulation, not a forecast. Worst 5% / 25% / median / 75% / best 5% of the final balance, the chance the account ends above €5,000, the win rate of its trades and how many trades it makes.",
+      h("div", { class: "tw" }, h("table", { class: "t21t" }, h("thead", null, h("tr", null, ["Strategy", "Worst 5%", "25%", "Median", "75%", "Best 5%", "Chance of profit", "Win rate", "Trades"].map((c, i) => h("th", { class: i ? "n" : "" }, c)))),
+        h("tbody", null, rows.map((r) => h("tr", null, r.map((c, i) => (i === 0 ? h("td", { class: "namecell" }, c) : h("td", { class: "n " + (c.cls || "") }, c.t))))))))));
+  }
+  // ---- scenarios + half edge
+  const bars = (title, cap, list) => {
+    const vals = list.map((x) => ({ n: x.name || x.id || "?", med: num(x.median) ? x.median : (num(x.p50) ? x.p50 : null), w: x.win_rate, ps: x.per_strategy })).filter((x) => x.med != null); if (!vals.length) return null;
+    const mx = Math.max(...vals.map((x) => Math.abs(x.med - 5000)), 1);
+    return card(title, cap, ...vals.map((x) => h("div", { style: "margin:8px 0" }, h("div", { class: "row", style: "justify-content:space-between;margin:0" }, h("span", null, x.n), h("b", { class: tn(x.med - 5000) }, money(x.med, 0) + (num(x.w) ? " · win " + (x.w <= 1 ? Math.round(x.w * 100) : Math.round(x.w)) + "%" : ""))),
+      h("div", { style: "background:var(--panel2);border-radius:6px;height:10px;overflow:hidden" }, h("div", { style: "height:100%;width:" + Math.max(2, Math.round(100 * Math.abs(x.med - 5000) / mx)) + "%;background:" + (x.med >= 5000 ? "var(--green)" : "var(--red)") })))));
+  };
+  const sc = Array.isArray(M.scenarios) ? M.scenarios : [];
+  const sb = bars("Scenarios: median end-of-2026 balance", "Simulation, not a forecast. Bar = distance of the median final balance from €5,000.", sc.map((s) => ({ name: s.name, median: s.median != null ? s.median : s.p50 != null ? s.p50 : s.combined_median, win_rate: s.win_rate })));
+  if (sb) v.appendChild(sb);
+  const scTab = sc.filter((s) => Array.isArray(s.per_strategy) && s.per_strategy.length);
+  scTab.forEach((s) => v.appendChild(card("Scenario: " + (s.name || ""), null, h("div", { class: "tw" }, h("table", { class: "t21t" }, h("thead", null, h("tr", null, ["Strategy", "Median", "Win rate"].map((c, i) => h("th", { class: i ? "n" : "" }, c)))), h("tbody", null, s.per_strategy.map((x) => h("tr", null, h("td", { class: "namecell" }, h("b", null, x.id || "?")), h("td", { class: "n " + (num(x.median != null ? x.median : x.p50) ? tn((x.median != null ? x.median : x.p50) - 5000) : "") }, money(x.median != null ? x.median : x.p50, 0)), h("td", { class: "n" }, num(x.win_rate) ? (x.win_rate <= 1 ? Math.round(x.win_rate * 100) : Math.round(x.win_rate)) + "%" : "–")))))))));
+  const he = M.half_edge;
+  if (he && typeof he === "object") {
+    const heList = Array.isArray(he) ? he : (Array.isArray(he.per_strategy) ? he.per_strategy : null);
+    v.appendChild(card("If the edge is only half as big", "Simulation, not a forecast. Same paths, but half of each strategy's average gross edge per trade is removed (a cautious case)." + (he.note ? " " + he.note : ""),
+      num(he.median) || num(he.p50) ? h("div", { class: "grid g4" }, metric(money(he.median != null ? he.median : he.p50, 0), "Median end of 2026", num(he.chance_profit) ? "chance of profit " + (he.chance_profit <= 1 ? Math.round(he.chance_profit * 100) : Math.round(he.chance_profit)) + "%" : "", tn((he.median != null ? he.median : he.p50) - 5000)), num(he.p5) ? metric(money(he.p5, 0), "Bad case (worst 5%)", "", tn(he.p5 - 5000)) : null, num(he.p95) ? metric(money(he.p95, 0), "Good case (best 5%)", "", tn(he.p95 - 5000)) : null) : null,
+      heList ? h("div", { class: "tw" }, h("table", { class: "t21t" }, h("thead", null, h("tr", null, ["Strategy", "Median", "Chance of profit"].map((c, i) => h("th", { class: i ? "n" : "" }, c)))), h("tbody", null, heList.map((x) => h("tr", null, h("td", { class: "namecell" }, h("b", null, x.id || "?")), h("td", { class: "n" }, money(x.median != null ? x.median : x.p50, 0)), h("td", { class: "n" }, num(x.chance_profit) ? (x.chance_profit <= 1 ? Math.round(x.chance_profit * 100) : Math.round(x.chance_profit)) + "%" : "–")))))) : null));
+  }
+  if (M.notes) v.appendChild(card("Notes", null, ...(Array.isArray(M.notes) ? M.notes : [M.notes]).map((n) => h("p", { class: "cap", style: "margin:4px 0" }, String(n)))));
+  v.appendChild(h("p", { class: "mut", style: "font-size:12.5px" }, "Simulation, not a forecast. Past trades re-played in random order; real results will differ. Practice only: no broker, no real order is ever placed."));
+}
+window.T21 = { render, renderOutlook, load, refresh: tick };
 Promise.all([load(), loadFU()]).then(rerender);
 })();
