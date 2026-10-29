@@ -15,6 +15,8 @@ async function load() {
 }
 async function loadFU() { const t = Math.floor(Date.now() / 60000); try { const j = await getJ(LOCAL ? ["data/t21fut.json?t=" + t] : [RAW + "t21fut.json?t=" + t, "data/t21fut.json?t=" + t]); if (!(FU && Date.parse(j.generated_utc) < Date.parse(FU.generated_utc))) FU = j; FUerr = null; } catch (x) { FUerr = String(x && x.message || x); } }
 async function loadFC() { if (FC) return; try { FC = await getJ(["data/equity_curves_fixed.json?v=" + VER, RAW + "equity_curves_fixed.json?v=" + VER]); FCerr = null; } catch (x) { FCerr = String(x && x.message || x); } }
+let PB = null, PBerr = null;
+async function loadPB() { const t = Math.floor(Date.now() / 60000); try { const j = await getJ(LOCAL ? ["data/connors.json?t=" + t] : [RAW + "connors.json?t=" + t, "data/connors.json?t=" + t]); if (!(PB && Date.parse(j.generated_utc) < Date.parse(PB.generated_utc))) PB = j; PBerr = null; } catch (x) { PBerr = String(x && x.message || x); } }
 let MC = null, MCerr = null;
 async function loadMC() { const t = Math.floor(Date.now() / 60000); try { const r = await getJ(LOCAL ? ["data/mc2026.json?t=" + t] : [RAW + "mc2026.json?t=" + t, "data/mc2026.json?t=" + t]); MC = r; MCerr = null; } catch (x) { MCerr = String(x && x.message || x); } }
 async function loadBT() { if (BT) return; try { BT = await getJ(["data/t21_bt.json?v=" + VER, RAW + "t21_bt.json?v=" + VER]); btErr = null; } catch (x) { btErr = String(x && x.message || x); } }
@@ -25,7 +27,7 @@ function rerender() {
   const y = window.scrollY; CH.splice(0).forEach((c) => { try { c.destroy(); } catch (e) {} }); v.innerHTML = ""; (window.__t21Mode === "outlook" ? window.T21.renderOutlook : window.T21.render)(v, window.__t21H); window.scrollTo(0, y);
   if (S.scroll) { S.scroll = false; const el = document.getElementById("t21-detail"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }
 }
-async function tick() { const a = document.activeElement; if (a && (a.tagName === "SELECT" || a.tagName === "INPUT")) return; await Promise.all([load(), loadFU(), window.__t21Mode === "outlook" ? loadMC() : null]); rerender(); }
+async function tick() { const a = document.activeElement; if (a && (a.tagName === "SELECT" || a.tagName === "INPUT")) return; await Promise.all([load(), loadFU(), loadPB(), window.__t21Mode === "outlook" ? loadMC() : null]); rerender(); }
 setInterval(tick, 60000);
 const MAD = (() => { try { return new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Madrid", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false }); } catch (e) { return null; } })();
 const fmtMad = (iso) => { try { return MAD.format(new Date(iso)).replace(",", "") + " Madrid"; } catch (e) { return iso; } };
@@ -132,6 +134,7 @@ function render(v, H) {
         h("tbody", null, frows.map((r) => h("tr", null, r.map((c, i) => (i === 0 ? h("td", { class: "namecell" }, c) : h("td", { class: "n " + (c.cls || "") }, c.t)))))))));
       fcard.appendChild(h("p", { class: "cap" }, "Backtest net € = after slippage and commission, whole contracts, risk 5% of the starting €5,000 (a strategy that loses more than the account stops trading). The other 16 strategies failed the futures backtest and were retired (list at the bottom).  S11 is the best of 21 tested on the same history (2018–23 was never used to pick it); treat the numbers as an upper bound until live practice shows the same. The NAS100 index data stands in for the futures price. ● = open trade right now."));
       v.appendChild(fcard);
+      try { pullbackSection(v, H); } catch (e) { console.error(e); }
       v.appendChild(h("h2", { style: "margin:6px 2px 0;font-size:17px" }, "Secondary comparisons: the €500 CFD sets"));
     } else if (FUerr) v.appendChild(card("Futures practice", null, h("p", { class: "mut" }, "Could not load the futures data: " + FUerr)));
   } catch (e) { v.appendChild(h("p", { class: "mut" }, "Futures section error: " + e.message)); }
@@ -290,6 +293,40 @@ function render(v, H) {
 }
 
 // ---- "2026 outlook" tab: Monte Carlo fan chart of the EUR5,000 combined futures account to 31 Dec 2026 (data/mc2026.json, written by another worker, refreshed every ~60 s)
+function pullbackSection(v, H) {
+  const { h, metric, pill } = H;
+  if (!PB && !PBerr) loadPB().then(rerender);
+  const sec = h("section", { class: "card", id: "t21-pullback" }, h("h2", null, "Pullback (Connors): 3 more practice accounts, higher win rate, slower trades"));
+  if (!PB || !PB.strategies) { sec.appendChild(h("p", { class: "mut" }, PBerr ? "Could not load the pullback data: " + PBerr : "Loading…")); v.appendChild(sec); return; }
+  const S3 = PB.strategies, T = PB.totals || {}, started = PB.started_utc, sig = PB.signal_check_now || {};
+  sec.appendChild(h("p", { class: "cap" }, "Buy the Nasdaq-100 after a dip while it is in an uptrend (above its 200-day average), sell when it bounces. Three published rules (Connors & Alvarez), each with its own €5,000 practice account trading 1 Micro Nasdaq future (MNQ) per signal, held overnight for 3–6 days on average (not intraday). One decision a day at 15:56 New York time (21:56 Madrid). " + (started ? "Live since " + fmtMad(started) + ". " : "") + "Practice only: 1 contract is about $59,000 of index, so an average loss is €550–1,750 (11–35% of the account); at €5,000 this is for practice, not for real money."));
+  sec.appendChild(h("div", { class: "grid g4" },
+    metric(smoney(T.pnl || 0, 2), "Live P&L, all 3", started ? "since " + fmtMad(started) : "", tn(T.pnl || 0)),
+    metric(String(T.trades || 0), "Live trades closed", (T.wins || 0) + " wins, " + (T.losses || 0) + " losses"),
+    metric(T.win_rate != null ? T.win_rate + "%" : "–", "Live win rate", T.trades ? "" : "no trade closed yet (about 10–15 a year each)"),
+    metric(String(T.open_positions || 0), "Open now", "next decision 21:56 Madrid (15:56 New York)")));
+  const grid = h("div", { class: "bestgrid", style: "margin-top:12px" });
+  S3.forEach((x, i) => {
+    const b = x.backtest, a = b.bt_2024_26, c = b.bt_2018_23, d = b.bt_1985_2017, op = x.open, sg = sig[x.id] || {};
+    const strip = op ? h("div", { class: "livestrip on" }, h("span", { class: "ldot" }), h("b", null, "IN A TRADE: LONG 1 MNQ"), " from " + op.entry_nq + " (since " + op.since + "), open ", h("b", { class: tn(op.open_pnl_eur) }, smoney(op.open_pnl_eur, 2)))
+      : h("div", { class: "livestrip" }, h("span", { class: "ldot off" }), h("span", null, "Flat. Right now: " + (sg.entry_signal ? "buy signal" : "no buy signal") + " (the real decision is at 21:56 Madrid)"));
+    const row = (lab, r) => h("tr", null, h("td", null, lab), h("td", { class: "n" }, String(r.n)), h("td", { class: "n" }, r.win + "%"), h("td", { class: "n " + tn(r.net) }, smoney(r.net)), h("td", { class: "n" }, money(r.mdd)));
+    grid.appendChild(h("div", { class: "bcard" + (i === 0 ? " first" : ""), style: "cursor:default" },
+      h("div", { class: "bhead" }, pill("Win rate " + a.win + "% / " + c.win + "% / " + d.win + "%", "ok")),
+      h("div", { class: "bname" }, h("b", null, x.id), " ", x.name),
+      h("div", { class: "bsmall" }, "Average hold " + b.avg_hold_sessions + " sessions. Live balance ", h("b", { class: tn(x.balance - 5000) }, money(x.balance, 2)), " · live trades " + x.trades + " · live win rate " + (x.win_rate != null ? x.win_rate + "%" : "–")),
+      strip,
+      h("div", { class: "tw" }, h("table", { class: "t21t" }, h("thead", null, h("tr", null, ["Test", "Trades", "Win %", "Net", "Max DD"].map((t, k) => h("th", { class: k ? "n" : "" }, t)))),
+        h("tbody", null, row("2024–26", a), row("2018–23", c), row("1985–17", d)))),
+      h("div", { class: "bsmall" }, "Average win / loss: 2024–26 " + smoney(a.avgw) + " / " + smoney(a.avgl) + " · 2018–23 " + smoney(c.avgw) + " / " + smoney(c.avgl) + " · 1985–2017 " + smoney(d.avgw) + " / " + smoney(d.avgl)),
+      h("div", { class: "bsmall" }, "2024–26 per year: ", Object.keys(a.years || {}).map((k) => h("span", { class: tn(a.years[k]) }, k + " " + smoney(a.years[k]) + "  "))),
+      h("div", { class: "bsmall" }, "2018–23 per year: ", Object.keys(c.years || {}).map((k) => h("span", { class: tn(c.years[k]) }, k + " " + smoney(c.years[k]) + "  ")))));
+  });
+  sec.appendChild(grid);
+  sec.appendChild(h("p", { class: "cap" }, "Backtest = 1 Micro Nasdaq contract at today's index level, 1 tick slippage and $0.94 per side, profits in €. 1985–2017 uses the Nasdaq-100 daily closes (never used to choose the rules); the same rules also win 75–77% on the S&P 500 and the Dow but not on the Russell 2000. Not a clean pass of the strict tests: only 28–38 trades in 2024–26, and only RSI(2) passes the multiple-testing correction on its own. They are uncorrelated with S11 (−0.04 to −0.16) but putting them in the same €5,000 account as S11 raises the chance of a 25% drop within a year from 18% to about 30%. Details: research_hf/newstrat/summary.md."));
+  v.appendChild(sec);
+}
+
 function renderOutlook(v, H) {
   window.__t21H = H; const { h, table, card, metric, callout, pill } = H; const M0 = MC; const num = (x) => (typeof x === "number" && isFinite(x));
   if (!MC && !MCerr) { loadMC().then(rerender); }
@@ -373,5 +410,5 @@ function renderOutlook(v, H) {
   v.appendChild(h("p", { class: "mut", style: "font-size:12.5px" }, "Simulation, not a forecast. Real days from 2018–2026 re-sampled in random blocks; real results will differ. Practice only: no broker, no real order is ever placed."));
 }
 window.T21 = { render, renderOutlook, load, refresh: tick };
-Promise.all([load(), loadFU()]).then(rerender);
+Promise.all([load(), loadFU(), loadPB()]).then(rerender);
 })();
