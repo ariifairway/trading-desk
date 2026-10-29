@@ -3,7 +3,7 @@
 // Data: t21.json (live + backtest summary, data branch on GitHub with local fallback), t21_bt.json (daily backtest curves) and t21_tr_Sxx.json (backtest trades; loaded on demand).
 (function () {
 "use strict";
-const VER = "20261029g", RAW = "https://raw.githubusercontent.com/ariifairway/trading-desk/data/";
+const VER = "20261029h", RAW = "https://raw.githubusercontent.com/ariifairway/trading-desk/data/";
 const LOCAL = location.hostname === "127.0.0.1" || location.hostname === "localhost";
 let D = null, err = null, BT = null, btErr = null, FU = null, FUerr = null, FC = null, FCerr = null; const TRS = {}, TRERR = {}; const CH = [];
 const S = { sel: "S11", cmb: "c01", month: null, page: 0, scroll: false };
@@ -76,7 +76,7 @@ function render(v, H) {
   if (!BT && !btErr) loadBT().then(rerender);
   if (!FU && !FUerr) loadFU().then(rerender);
   const L = D.live || {}, B = D.backtest; if (!B) { v.appendChild(card("Nasdaq 21", null, h("p", null, "No backtest data yet."))); return; }
-  const strategies = B.strategies.slice().sort((a, b) => a.rank - b.rank), top = strategies.filter((x) => x.c01.total > 0), byId = {}; strategies.forEach((x) => (byId[x.id] = x));
+  const ACT = (D.live && D.live.active_strategies) || (FU && FU.active_strategies) || null, allB = B.strategies.slice().sort((a, b) => a.rank - b.rank), strategies = ACT ? allB.filter((x) => ACT.indexOf(x.id) >= 0) : allB, top = strategies, byId = {}; strategies.forEach((x) => (byId[x.id] = x)); const nProfitAll = allB.filter((x) => x.c01.total > 0).length;
   if (!byId[S.sel]) S.sel = strategies[0].id;
   const ld = liveDates(); const sel = (id) => { S.sel = id; S.month = null; S.page = 0; S.scroll = true; rerender(); };
   const feed = (D.live && D.live.last_bar_utc) ? (Date.now() - Date.parse(D.live.last_bar_utc)) / 60000 < 15 : false;
@@ -88,12 +88,12 @@ function render(v, H) {
       const rankOf = {}; (FU.ranking_2018_26 || []).forEach((r) => (rankOf[r.id] = r.rank));
       const liveBal = FS.reduce((a, x) => a + (fl(x) ? fl(x).balance : 5000), 0), livePnl = FS.reduce((a, x) => a + (fl(x) ? fl(x).pnl : 0), 0), todayP = FS.reduce((a, x) => a + (fl(x) ? fl(x).pnl_today : 0), 0), nTr = FS.reduce((a, x) => a + (fl(x) ? fl(x).trades : 0), 0), nOp = FS.filter((x) => fl(x) && fl(x).open && !fl(x).open.skipped_too_big && !fl(x).open.pre_start).length, nSk = FU.skipped_total || 0;
       const fcard = h("section", { class: "card hl", id: "t21-fut" }, h("h2", null, "★ Main practice: €5,000 Micro Nasdaq futures (MNQ)"),
-        h("p", { class: "cap" }, "21 strategies, each with its own €5,000 practice account. Risk " + (M.risk_pct_of_equity || 5) + "% of the account per trade, whole MNQ contracts ($" + (M.usd_per_point || 2) + " a point), costs included: " + (M.slippage_ticks || 1) + " tick slippage and $" + (M.commission_usd_per_side || 0.94) + " per side. " + (started ? "Live since " + fmtMad(started) + ". " : "Not started yet. ") + "Simulation only, no broker, no real order."),
+        h("p", { class: "cap" }, FS.length + " active strategies, each with its own €5,000 practice account. Risk " + (M.risk_pct_of_equity || 5) + "% of the account per trade, whole MNQ contracts ($" + (M.usd_per_point || 2) + " a point), costs included: " + (M.slippage_ticks || 1) + " tick slippage and $" + (M.commission_usd_per_side || 0.94) + " per side. " + (started ? "Live since " + fmtMad(started) + ". " : "Not started yet. ") + "Simulation only, no broker, no real order."),
         h("div", { class: "grid g4" },
-          metric(smoney(livePnl, 2), "Live P&L, all 21", started ? "since " + fmtMad(started) : "waiting for the first run", tn(livePnl)),
-          metric(smoney(todayP, 2), "Today, all 21", nTr + " trades so far, " + nOp + " open", tn(todayP)),
-          metric(money(liveBal, 0), "Total of the 21 accounts", "21 × €5,000 = €105,000 at the start"),
-          metric(String(nSk), "Trades skipped", "one MNQ would risk more than the cap")));
+          metric(smoney(livePnl, 2), "Live P&L, all " + FS.length, started ? "since " + fmtMad(started) : "waiting for the first run", tn(livePnl)),
+          metric(smoney(todayP, 2), "Today, all " + FS.length, nTr + " trades so far, " + nOp + " open", tn(todayP)),
+          metric(money(liveBal, 0), "Total of the " + FS.length + " accounts", FS.length + " × €5,000 = " + money(FS.length * 5000, 0) + " at the start"),
+          metric(T.win_rate != null ? T.win_rate + "%" : "–", "Live win rate", (T.wins || 0) + " wins, " + (T.losses || 0) + " losses" + (T.win_rate_today != null ? " · today " + T.win_rate_today + "%" : "") + " · skipped " + nSk), ));
       const bgrid = h("div", { class: "bestgrid", style: "margin-top:12px" });
       bestIds.forEach((id, i) => {
         const x = fsById[id]; if (!x) return; const l = fl(x), b = x.backtest, a = b.p2024_26, c = b.p2018_23, op = l && l.open && !l.open.skipped_too_big && !l.open.pre_start ? l.open : null;
@@ -104,14 +104,15 @@ function render(v, H) {
           h("div", { class: "bnums" },
             h("div", null, h("div", { class: "bv " + tn(a.net_eur) }, smoney(a.net_eur)), h("div", { class: "bl" }, "backtest 2024–26")),
             h("div", null, h("div", { class: "bv " + tn(c.net_eur) }, smoney(c.net_eur)), h("div", { class: "bl" }, "backtest 2018–23"))),
-          h("div", { class: "bsmall" }, a.trades + " + " + c.trades + " trades · win " + a.win_rate + "% / " + c.win_rate + "% · worst drop " + money(a.max_drawdown_eur) + " / " + money(c.max_drawdown_eur)),
+          h("div", { class: "bsmall" }, a.trades + " + " + c.trades + " trades · worst drop " + money(a.max_drawdown_eur) + " / " + money(c.max_drawdown_eur)),
+          h("div", { class: "bsmall" }, h("b", null, "Win rate"), " 2024–26 " + a.win_rate + "% · 2018–23 " + c.win_rate + "%" + (l && l.backtest && l.backtest.win_rate_combined != null ? " · combined " + l.backtest.win_rate_combined + "%" : "")),
           h("div", { class: "bsmall" }, "2024–26 per year: ", Object.keys(a.per_year).map((k) => h("span", { class: tn(a.per_year[k]) }, k + " " + smoney(a.per_year[k]) + "  "))),
           h("div", { class: "blive" }, h("div", { class: "bl2" }, "Live €5,000 account"), strip,
-            h("div", { class: "bsmall2" }, l ? h("span", null, "Balance ", h("b", { class: tn(l.balance - 5000) }, money(l.balance, 2)), " · today ", h("b", { class: tn(l.pnl_today) }, smoney(l.pnl_today, 2)), " · trades today " + l.trades_today) : ""))));
+            h("div", { class: "bsmall2" }, l ? h("span", null, "Balance ", h("b", { class: tn(l.balance - 5000) }, money(l.balance, 2)), " · today ", h("b", { class: tn(l.pnl_today) }, smoney(l.pnl_today, 2)), " · trades today " + l.trades_today + " · live win rate " + (l.win_rate != null ? l.win_rate + "%" : "–") + (l.win_rate_today != null ? " (today " + l.win_rate_today + "%)" : "")) : ""))));
       });
       fcard.appendChild(bgrid);
       // equity chart 2018 -> today
-      fcard.appendChild(h("h3", { style: "margin-top:14px" }, "The 5 best on futures, January 2018 to today"));
+      fcard.appendChild(h("h3", { style: "margin-top:14px" }, "The " + bestIds.length + " active strategies on futures, January 2018 to today"));
       fcard.appendChild(h("p", { class: "cap" }, "Daily balance from €5,000 (simulated backtest, risk fixed at 5% of the starting €5,000, 1 tick slippage, $0.94 per side). The 2018–23 and 2024–26 runs are joined at 1 Jan 2024."));
       const fcb = chartBox(h, 300); fcard.appendChild(fcb);
       if (!FC && !FCerr) loadFC().then(rerender);
@@ -125,11 +126,11 @@ function render(v, H) {
       else fcb.appendChild(h("p", { class: "mut" }, FCerr ? "Could not load the curves: " + FCerr : "Loading the chart…"));
       // all 21
       const frows = FS.slice().sort((a, b) => (rankOf[a.id] || 99) - (rankOf[b.id] || 99)).map((x) => { const l = fl(x), b = x.backtest, a = b.p2024_26, c = b.p2018_23, both = a && c && a.net_eur > 0 && c.net_eur > 0;
-        return [h("span", null, h("b", null, x.id), " ", x.name.slice(0, 30)), { t: l ? money(l.balance, 2) + (l.open && !l.open.skipped_too_big && !l.open.pre_start ? " ●" : "") : "–", cls: tn(l ? l.balance - 5000 : 0) }, { t: l ? smoney(l.pnl_today, 2) : "–", cls: tn(l ? l.pnl_today : 0) }, { t: a ? smoney(a.net_eur) : "–", cls: tn(a ? a.net_eur : 0) }, { t: c ? smoney(c.net_eur) : "–", cls: tn(c ? c.net_eur : 0) }, { t: a ? money(a.max_drawdown_eur) : "–" }, { t: both ? "yes" : "no", cls: both ? "pos" : "mut" }]; });
-      fcard.appendChild(h("h3", { style: "margin-top:14px" }, "All 21 on futures, best first"));
-      fcard.appendChild(h("div", { class: "tw" }, h("table", { class: "t21t" }, h("thead", null, h("tr", null, ["Strategy", "Live balance", "Live today", "2024–26", "2018–23", "Worst drop 24–26", "Both +"].map((c, i) => h("th", { class: i ? "n" : "" }, c)))),
+        return [h("span", null, h("b", null, x.id), " ", x.name.slice(0, 30)), { t: l ? money(l.balance, 2) + (l.open && !l.open.skipped_too_big && !l.open.pre_start ? " ●" : "") : "–", cls: tn(l ? l.balance - 5000 : 0) }, { t: l ? smoney(l.pnl_today, 2) : "–", cls: tn(l ? l.pnl_today : 0) }, { t: a ? smoney(a.net_eur) : "–", cls: tn(a ? a.net_eur : 0) }, { t: c ? smoney(c.net_eur) : "–", cls: tn(c ? c.net_eur : 0) }, { t: a ? money(a.max_drawdown_eur) : "–" }, { t: l && l.win_rate != null ? l.win_rate + "%" : "–" }, { t: l && l.win_rate_today != null ? l.win_rate_today + "%" : "–" }, { t: a ? a.win_rate + "%" : "–" }, { t: c ? c.win_rate + "%" : "–" }, { t: l && l.backtest && l.backtest.win_rate_combined != null ? l.backtest.win_rate_combined + "%" : "–" }, { t: both ? "yes" : "no", cls: both ? "pos" : "mut" }]; });
+      fcard.appendChild(h("h3", { style: "margin-top:14px" }, "The active strategies on futures, best first"));
+      fcard.appendChild(h("div", { class: "tw" }, h("table", { class: "t21t" }, h("thead", null, h("tr", null, ["Strategy", "Live balance", "Live today", "2024–26", "2018–23", "Worst drop 24–26", "Live win %", "Win % today", "Win % 24–26", "Win % 18–23", "Win % both", "Both +"].map((c, i) => h("th", { class: i ? "n" : "" }, c)))),
         h("tbody", null, frows.map((r) => h("tr", null, r.map((c, i) => (i === 0 ? h("td", { class: "namecell" }, c) : h("td", { class: "n " + (c.cls || "") }, c.t)))))))));
-      fcard.appendChild(h("p", { class: "cap" }, "Backtest net € = after slippage and commission, whole contracts, risk 5% of the starting €5,000 (a strategy that loses more than the account stops trading). Only 5 of the 21 make money in both periods. S11 is the best of 21 tested on the same history (2018–23 was never used to pick it); treat the numbers as an upper bound until live practice shows the same. The NAS100 index data stands in for the futures price. ● = open trade right now."));
+      fcard.appendChild(h("p", { class: "cap" }, "Backtest net € = after slippage and commission, whole contracts, risk 5% of the starting €5,000 (a strategy that loses more than the account stops trading). The other 16 strategies failed the futures backtest and were retired (list at the bottom).  S11 is the best of 21 tested on the same history (2018–23 was never used to pick it); treat the numbers as an upper bound until live practice shows the same. The NAS100 index data stands in for the futures price. ● = open trade right now."));
       v.appendChild(fcard);
       v.appendChild(h("h2", { style: "margin:6px 2px 0;font-size:17px" }, "Secondary comparisons: the €500 CFD sets"));
     } else if (FUerr) v.appendChild(card("Futures practice", null, h("p", { class: "mut" }, "Could not load the futures data: " + FUerr)));
@@ -137,12 +138,13 @@ function render(v, H) {
   // ---- header
   const lastBarAge = L.last_bar_utc ? (Date.now() - Date.parse(L.last_bar_utc)) / 60000 : null;
   const totT = (L.strategies || []).reduce((s, x) => s + x.trades_today, 0), totP = (L.strategies || []).reduce((s, x) => s + x.pnl_today, 0), nOpen = (L.strategies || []).filter((x) => x.open).length;
-  v.appendChild(h("section", { class: "card topcard" }, h("h2", null, "Nasdaq-100: 21 strategies, best ones first"),
+  v.appendChild(h("section", { class: "card topcard" }, h("h2", null, "€500 CFD set: the active strategies, best first"),
     h("div", { class: "mini" },
       h("div", null, h("b", { class: feed ? "pos" : "warn" }, feed ? "● Live" : "Market closed"), h("span", { class: "mut" }, " · last price " + (L.last_bar_madrid || "–").replace(/^\d+ \w+ /, "") + " Madrid")),
       h("div", null, h("b", null, totT + " trades today"), h("span", { class: "mut" }, " · " + nOpen + " open")),
-      h("div", null, h("b", { class: tn(totP) }, smoney(totP, 2) + " today"), h("span", { class: "mut" }, " (all 21, zero cost)"))),
-    h("p", { class: "cap", style: "margin:8px 0 0" }, "Practice only: 21 published rule sets, each with its own €500 account and €25 risk per trade. No broker, no real order.")));
+      h("div", null, h("b", { class: tn(totP) }, smoney(totP, 2) + " today"), h("span", { class: "mut" }, " (all active, zero cost)")),
+      L.totals && L.totals.win_rate != null ? h("div", null, h("b", null, "Win rate " + L.totals.win_rate + "%"), h("span", { class: "mut" }, " · " + (L.totals.wins || 0) + " wins, " + (L.totals.losses || 0) + " losses" + (L.totals.win_rate_today != null ? " · today " + L.totals.win_rate_today + "%" : ""))) : null),
+    h("p", { class: "cap", style: "margin:8px 0 0" }, "Practice only: the " + strategies.length + " active strategies, each with its own €500 account and €25 risk per trade (the €500 CFD set, secondary). No broker, no real order.")));
   // ---- best strategies
   const best = h("div", { class: "bestgrid" });
   top.forEach((x, i) => {
@@ -160,12 +162,12 @@ function render(v, H) {
       h("div", { class: "bsmall" }, "Per year at 0.01%: ", Object.keys(yrs).map((k) => h("span", { class: tn(yrs[k]) }, k + " " + smoney(yrs[k]) + "  "))),
       x.id === "S11" ? h("div", { class: "bwarn" }, "All its profit is from short trades; best of 21 tested, so some luck.") : (neg.length ? h("div", { class: "bwarn" }, "Lost money in " + neg.join(", ") + " at 0.01% cost.") : null),
       h("div", { class: "blive" }, h("div", { class: "bl2" }, "Live practice"), status,
-        h("div", { class: "bsmall2" }, l ? h("span", null, "Balance ", h("b", { class: tn((l.balance || 500) - 500) }, money(l.balance, 2)), " · today ", h("b", { class: tn(l.pnl_today) }, smoney(l.pnl_today, 2)), " · trades today " + l.trades_today) : ""),
+        h("div", { class: "bsmall2" }, l ? h("span", null, "Balance ", h("b", { class: tn((l.balance || 500) - 500) }, money(l.balance, 2)), " · today ", h("b", { class: tn(l.pnl_today) }, smoney(l.pnl_today, 2)), " · trades today " + l.trades_today + " · win rate " + (l.win_rate != null ? l.win_rate + "%" : "–") + (l.win_rate_today != null ? " (today " + l.win_rate_today + "%)" : "")) : ""),
         last ? h("div", { class: "bsmall2 mut" }, "Last trade " + last.time + ": " + last.side + " " + last.entry + " → " + last.exit + " ", h("b", { class: tn(last.pnl) }, smoney(last.pnl, 2))) : h("div", { class: "bsmall2 mut" }, "No trade closed yet today")),
       h("div", { class: "btap" }, "Tap for chart, rules and trades ›")));
   });
-  v.appendChild(h("section", { class: "card hl" }, h("h2", null, "★ Best strategies (the " + top.length + " profitable after costs)"), h("p", { class: "cap" }, "Ranked by backtest profit at 0.01% cost per side, January 2024 to 28 October 2026. All of them trade live in practice right now."), best));
-  v.appendChild(callout("Honest summary: only " + top.length + " of the 21 made money in the backtest once a small trading cost (0.01% per side) is counted. S11 is the best, but all its profit came from short trades and it is the best of 21 tested, so part of it may be luck. The live accounts trade at zero cost, so their balances look better than a real account would. The next weeks of live trading are the real test."));
+  v.appendChild(h("section", { class: "card hl" }, h("h2", null, "The " + top.length + " active strategies on the €500 CFD set"), h("p", { class: "cap" }, "Ranked by backtest profit at 0.01% cost per side, January 2024 to 28 October 2026. The other " + (allB.length - top.length) + " failed their backtest and were retired (list at the bottom). All active ones trade live in practice right now."), best));
+  v.appendChild(callout("Honest summary: only " + nProfitAll + " of the 21 made money in the backtest once a small trading cost (0.01% per side) is counted. S11 is the best, but all its profit came from short trades and it is the best of 21 tested, so part of it may be luck. The live accounts trade at zero cost, so their balances look better than a real account would. The next weeks of live trading are the real test."));
   // ---- YOUR RULES comparison (-30 / +45 / lock +1 at +20) vs the current rules: live balances (separate EUR500 accounts) + backtest
   try {
     const U = D.userrules, UL = U && U.live, UB = U && U.bt;
@@ -176,18 +178,18 @@ function render(v, H) {
         const c = liveOf(x.id), u = ul(x.id), b = UB[x.id]; if (!b) return null;
         const cell = (q) => (q ? { t: money(q.balance, 2) + (q.open ? " ●" : ""), cls: tn(q.balance - 500) } : { t: "–", cls: "mut" });
         const bt = (o, k) => ({ t: smoney(o[k].total), cls: tn(o[k].total) });
-        return [h("span", null, h("b", null, x.id), " ", x.name.slice(0, 26)), cell(c), cell(u), bt(b.cur, "0.0001"), bt(b.user, "0.0001"), bt(b.cur, "0.0"), bt(b.user, "0.0")];
+        const wrc = (q) => ({ t: q && q.win_rate != null ? q.win_rate + "%" : "–" }); return [h("span", null, h("b", null, x.id), " ", x.name.slice(0, 26)), cell(c), cell(u), wrc(c), wrc(u), bt(b.cur, "0.0001"), bt(b.user, "0.0001"), bt(b.cur, "0.0"), bt(b.user, "0.0")];
       }).filter(Boolean);
-      const sumBt = (k, c) => Object.values(UB).reduce((a, o) => a + o[k][c].total, 0), nPos = (k, c) => Object.values(UB).filter((o) => o[k][c].total > 0).length;
+      const UBa = Object.keys(UB).filter((id) => !ACT || ACT.indexOf(id) >= 0).map((id) => UB[id]), sumBt = (k, c) => UBa.reduce((a, o) => a + o[k][c].total, 0), nPos = (k, c) => UBa.filter((o) => o[k][c].total > 0).length;
       v.appendChild(h("section", { class: "card hl2", id: "t21-userrules" }, h("h2", null, "Your rules (−€30 / +€45 / lock +€1 at +€20) vs the current rules"),
         h("p", { class: "cap" }, "Same entries, different exits. Your rules: about €10,000 per trade, stop −0.30% (−€30), target +0.45% (+€45), once +€20 is reached the stop moves to +€1, 60 min max. Both sets run live on separate €500 practice accounts (zero cost) since " + (UL.started_utc ? fmtMad(UL.started_utc) : "29 Oct") + ". Today's earlier trades were replayed from the minute bars, like the current set."),
         h("div", { class: "grid g4" },
-          metric(smoney(curTot, 2), "Live total, current rules", "all 21, since 29 Oct", tn(curTot)),
+          metric(smoney(curTot, 2), "Live total, current rules", "all " + (L.strategies || []).length + " active, since 29 Oct", tn(curTot)),
           metric(smoney(tot.pnl, 2), "Live total, your rules", (tot.trades || 0) + " trades, " + (tot.open_positions || 0) + " open", tn(tot.pnl)),
-          metric(smoney(sumBt("cur", "0.0001")), "Backtest, current rules, 0.01% cost", nPos("cur", "0.0001") + " of 21 profitable", tn(sumBt("cur", "0.0001"))),
-          metric(smoney(sumBt("user", "0.0001")), "Backtest, your rules, 0.01% cost", nPos("user", "0.0001") + " of 21 profitable", tn(sumBt("user", "0.0001")))),
+          metric(smoney(sumBt("cur", "0.0001")), "Backtest, current rules, 0.01% cost", nPos("cur", "0.0001") + " of " + UBa.length + " profitable", tn(sumBt("cur", "0.0001"))),
+          metric(smoney(sumBt("user", "0.0001")), "Backtest, your rules, 0.01% cost", nPos("user", "0.0001") + " of " + UBa.length + " profitable", tn(sumBt("user", "0.0001")))),
         h("p", { class: "cap", style: "margin-top:10px" }, "Backtest 2 Jan 2024 – 28 Oct 2026, fixed €10,000 per trade, sorted by your rules at 0.01%. ● = open trade right now. Live balance starts at €500."),
-        h("div", { class: "tw" }, h("table", { class: "t21t" }, h("thead", null, h("tr", null, ["Strategy", "Live: current", "Live: yours", "0.01%: current", "0.01%: yours", "Zero cost: current", "Zero cost: yours"].map((c, i) => h("th", { class: i ? "n" : "" }, c)))),
+        h("div", { class: "tw" }, h("table", { class: "t21t" }, h("thead", null, h("tr", null, ["Strategy", "Live: current", "Live: yours", "Live win %: current", "Live win %: yours", "0.01%: current", "0.01%: yours", "Zero cost: current", "Zero cost: yours"].map((c, i) => h("th", { class: i ? "n" : "" }, c)))),
           h("tbody", null, urows.map((r) => h("tr", null, r.map((c, i) => (i === 0 ? h("td", { class: "namecell" }, c) : h("td", { class: "n " + (c.cls || "") }, c.t)))))))),
         h("p", { class: "cap" }, "Verdict so far: your rules do worse than the current ones in the backtest (the \"+€1 lock\" closes many trades that would later reach the target). We are letting them run live next to each other so both are tested on the same real prices.")));
     }
@@ -206,12 +208,12 @@ function render(v, H) {
     const tr = h("tr", { class: "clk" + (loser ? " loser" : "") + (S.sel === x.id ? " selrow" : ""), onclick: () => sel(x.id) },
       h("td", { class: "n" }, String(x.rank)), h("td", { class: "namecell" }, h("b", null, x.id), " ", x.name, h("div", null, pill(vshort(x)[0], vshort(x)[1]))),
       h("td", { class: "n " + tn(x.c01.total) }, smoney(x.c01.total)), h("td", { class: "n " + tn(x.c0.total) }, smoney(x.c0.total)), h("td", { class: "n" }, String(x.trades)), h("td", { class: "n" }, x.c0.win + "%"), h("td", { class: "n" }, money(x.c0.mdd)),
-      h("td", { class: "n" }, l ? money(l.balance, 2) : "–"), h("td", { class: "n " + tn(l ? l.pnl_today : 0) }, l ? smoney(l.pnl_today, 2) : "–"), h("td", null, l && l.open ? pill(l.open.side + " " + smoney(l.open.open_pnl, 2), l.open.open_pnl >= 0 ? "ok" : "bad") : h("span", { class: "mut" }, "flat")));
+      h("td", { class: "n" }, l ? money(l.balance, 2) : "–"), h("td", { class: "n " + tn(l ? l.pnl_today : 0) }, l ? smoney(l.pnl_today, 2) : "–"), h("td", { class: "n" }, l && l.win_rate != null ? l.win_rate + "%" : "–"), h("td", { class: "n" }, l && l.win_rate_today != null ? l.win_rate_today + "%" : "–"), h("td", null, l && l.open ? pill(l.open.side + " " + smoney(l.open.open_pnl, 2), l.open.open_pnl >= 0 ? "ok" : "bad") : h("span", { class: "mut" }, "flat")));
     return tr;
   });
-  const th = ["#", "Strategy", "Backtest, 0.01% cost", "Backtest, zero cost", "Trades", "Win rate", "Worst drop", "Live balance", "Live today", "Open"];
-  const tbl = h("div", { class: "tw" }, h("table", { class: "t21t" }, h("thead", null, h("tr", null, th.map((c, i) => h("th", { class: [0, 2, 3, 4, 5, 6, 7, 8].includes(i) ? "n" : "" }, c)))), h("tbody", null, rows)));
-  v.appendChild(card("All 21 strategies, best to worst", "Backtest January 2024 – 28 October 2026. Tap a row to see its chart, rules, source and every trade. Strategies marked 'No edge' lose money even before costs or are not worth trading.", tbl));
+  const th = ["#", "Strategy", "Backtest, 0.01% cost", "Backtest, zero cost", "Trades", "Backtest win rate", "Worst drop", "Live balance", "Live today", "Live win rate", "Win rate today", "Open"];
+  const tbl = h("div", { class: "tw" }, h("table", { class: "t21t" }, h("thead", null, h("tr", null, th.map((c, i) => h("th", { class: [0, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(i) ? "n" : "" }, c)))), h("tbody", null, rows)));
+  v.appendChild(card("The active strategies, best to worst", "Backtest January 2024 – 28 October 2026. Tap a row to see its chart, rules, source and every trade. Strategies marked 'No edge' lose money even before costs or are not worth trading.", tbl));
   // ---- detail
   const x = byId[S.sel], l = liveOf(x.id), vv = vlabel(x), isTop = top.indexOf(x) >= 0;
   const det = h("section", { class: "card hl2", id: "t21-detail" },
@@ -266,6 +268,24 @@ function render(v, H) {
     }
   }
   v.appendChild(det);
+  // ---- retired strategies (collapsed): from live.json -> retired[] of each practice set
+  try {
+    const R = {}; const take = (list, key) => (list || []).forEach((r) => { const o = R[r.id] || (R[r.id] = { id: r.id, name: r.name, reason: r.reason }); o[key] = r; });
+    take(D.live && D.live.retired, "cfd"); take(FU && FU.retired, "fut"); take(D.userrules && D.userrules.live && D.userrules.live.retired, "usr");
+    const ids = Object.keys(R).sort();
+    if (ids.length) {
+      const bal = (r, eur) => (r ? { t: money(r.balance, 2), cls: tn(r.balance - eur) } : { t: "–", cls: "mut" });
+      const wr = (r) => (r && r.win_rate != null ? r.win_rate + "%" : "–");
+      const det2 = h("details", { class: "card", style: "background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px 16px" },
+        h("summary", { style: "cursor:pointer;font-weight:650" }, "Retired (failed backtest): " + ids.length + " strategies, stopped, no new trades"),
+        h("p", { class: "cap", style: "margin:8px 0" }, "These failed the futures backtest (the reason for each is under its name) and were switched off. Their accounts are frozen at the balance below. Tap a row's name for the reason."),
+        h("div", { class: "tw" }, h("table", { class: "t21t" }, h("thead", null, h("tr", null, ...["Strategy", "Final balance, €500 CFD", "Final balance, your rules", "Final balance, €5,000 futures", "Live win rate (CFD)", "Backtest win rate 24–26 / 18–23"].map((c, i) => h("th", { class: i ? "n" : "" }, c)))),
+          h("tbody", null, ...ids.map((id) => { const o = R[id], b = (o.cfd || o.fut || o.usr || {}).backtest || {}, cb = bal(o.cfd, 500), ub = bal(o.usr, 500), fb = bal(o.fut, 5000);
+            return h("tr", null, h("td", { class: "namecell" }, h("details", null, h("summary", { style: "cursor:pointer" }, h("b", null, id), " ", String(o.name || "").replace(/ \(.*$/, "")), h("div", { class: "small mut", style: "margin-top:4px;white-space:normal" }, o.reason || ""))),
+              h("td", { class: "n " + cb.cls }, cb.t), h("td", { class: "n " + ub.cls }, ub.t), h("td", { class: "n " + fb.cls }, fb.t), h("td", { class: "n" }, wr(o.cfd)), h("td", { class: "n" }, (b.win_2024_26 != null ? b.win_2024_26 + "%" : "–") + " / " + (b.win_2018_23 != null ? b.win_2018_23 + "%" : "–"))); })))));
+      v.appendChild(det2);
+    }
+  } catch (e) { v.appendChild(h("p", { class: "mut" }, "Retired list error: " + e.message)); }
   v.appendChild(h("p", { class: "mut", style: "font-size:12.5px" }, "Data file generated " + fmtMad(D.generated_utc) + ". Practice only: simulated accounts, no broker, no real order is ever placed."));
 }
 
@@ -275,7 +295,7 @@ function renderOutlook(v, H) {
   if (!MC && !MCerr) { loadMC().then(rerender); }
   v.appendChild(h("section", { class: "card topcard" }, h("h2", null, "2026 outlook: where could the €5,000 futures account end the year?"),
     h("p", { class: "cap", style: "margin:4px 0 0" }, "Simulation, not a forecast. " + (M0 && M0.label ? M0.label + " " : "") + "Thousands of random re-orderings of the strategies' past trades are replayed to 31 December 2026. It shows the range of outcomes the backtest edge could give, including bad luck. The real edge may be smaller, so treat the middle line as a hopeful case, not a promise. No broker, no real order.")));
-  if (!MC) { v.appendChild(card(null, null, h("p", { class: "mut" }, MCerr ? "The outlook data is not published yet (" + MCerr + "). It appears here as soon as the simulation starts; this page checks every minute." : "Loading…"))); return; }
+  if (!MC) { v.appendChild(card("Pictures from the last finished run", "Simulation, not a forecast.", h("img", { src: "mc2026_fan.png", alt: "Fan chart", style: "max-width:100%;border-radius:8px" }), h("img", { src: "mc2026_scenarios.png", alt: "Scenarios", style: "max-width:100%;border-radius:8px;margin-top:10px" }))); v.appendChild(card(null, null, h("p", { class: "mut" }, MCerr ? "The outlook data is not published yet (" + MCerr + "). It appears here as soon as the simulation starts; this page checks every minute." : "Loading…"))); return; }
   const M = MC, run = M.status === "running", pd = num(M.paths_done) ? M.paths_done : null, pt = num(M.paths_total) ? M.paths_total : null, pct = pd != null && pt ? Math.min(100, Math.round(100 * pd / pt)) : (M.status === "done" ? 100 : 0);
   const upd = M.updated ? (/Madrid/.test(String(M.updated)) ? String(M.updated).replace(/\s*\(.*$/, "") + " Madrid" : (isNaN(Date.parse(M.updated)) ? String(M.updated) : fmtMad(M.updated))) : "–";
   v.appendChild(h("section", { class: "card hl2" }, h("div", { class: "row", style: "justify-content:space-between" }, h("b", null, run ? "Simulation running…" : M.status === "done" ? "Simulation finished" : "Status: " + (M.status || "unknown")), pill(run ? "running" : M.status === "done" ? "done" : "?", run ? "warn" : "ok")),
