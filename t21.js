@@ -1,67 +1,185 @@
-// "Nasdaq 21" tab: 21 rule-based Nasdaq-100 strategies, live practice leaderboard + backtest table + sources. Self-contained module; app.js only calls window.T21.render().
-// Data: t21.json (data branch of the GitHub repo, falls back to the copy bundled with the page). Practice only, zero cost in the live accounts.
+// "Nasdaq 21" tab (landing page): best strategies first, all 21 ranked, equity charts back to Jan 2024, per-strategy rules, sources and browsable trade lists.
+// Self-contained module; app.js only calls window.T21.render(v, helpers). Practice only: no broker, no real order.
+// Data: t21.json (live + backtest summary, data branch on GitHub with local fallback), t21_bt.json (daily backtest curves) and t21_tr_Sxx.json (backtest trades; loaded on demand).
 (function () {
 "use strict";
-const RAW = "https://raw.githubusercontent.com/ariifairway/trading-desk/data/";
-let D = null, err = null, lastOk = 0; const S = { sort: "balance", dir: -1, bt: "rank", btdir: 1 };
+const VER = "20261029b", RAW = "https://raw.githubusercontent.com/ariifairway/trading-desk/data/";
+const LOCAL = location.hostname === "127.0.0.1" || location.hostname === "localhost";
+let D = null, err = null, BT = null, btErr = null; const TRS = {}, TRERR = {}; const CH = [];
+const S = { sel: "S11", cmb: "c01", month: null, page: 0, scroll: false };
+const PAGE = 40;
+async function getJ(urls) { let e; for (const u of urls) { try { const r = await fetch(u, { cache: "no-store" }); if (!r.ok) throw new Error("HTTP " + r.status); return await r.json(); } catch (x) { e = x; } } throw e; }
 async function load() {
-  const t = Math.floor(Date.now() / 60000), local = location.hostname === "127.0.0.1" || location.hostname === "localhost";
-  const src = local ? ["data/t21.json?t=" + t] : [RAW + "t21.json?t=" + t, "data/t21.json?t=" + t]; let e;
-  for (const u of src) {
-    try { const r = await fetch(u, { cache: "no-store" }); if (!r.ok) throw new Error("HTTP " + r.status); const j = await r.json(); if (D && Date.parse(j.generated_utc) < Date.parse(D.generated_utc)) return; D = j; err = null; lastOk = Date.now(); return; } catch (x) { e = x; }
-  }
-  err = String(e);
+  const t = Math.floor(Date.now() / 60000);
+  try { const j = await getJ(LOCAL ? ["data/t21.json?t=" + t] : [RAW + "t21.json?t=" + t, "data/t21.json?t=" + t]); if (!(D && Date.parse(j.generated_utc) < Date.parse(D.generated_utc))) D = j; err = null; } catch (x) { err = String(x && x.message || x); }
 }
-function rerender() { if (location.hash.slice(1) === "t21" && window.__t21H) { const v = document.getElementById("view"); if (v) { const y = window.scrollY; v.innerHTML = ""; window.T21.render(v, window.__t21H); window.scrollTo(0, y); } } }
-async function tick() { await load(); rerender(); }
+async function loadBT() { if (BT) return; try { BT = await getJ(["data/t21_bt.json?v=" + VER, RAW + "t21_bt.json?v=" + VER]); btErr = null; } catch (x) { btErr = String(x && x.message || x); } }
+async function loadTR(id) { if (TRS[id]) return; try { TRS[id] = await getJ(["data/t21_tr_" + id + ".json?v=" + VER, RAW + "t21_tr_" + id + ".json?v=" + VER]); delete TRERR[id]; } catch (x) { TRERR[id] = String(x && x.message || x); } }
+let busy = false;
+function rerender() {
+  if (!window.__t21On || !window.__t21H) return; const v = document.getElementById("view"); if (!v) return;
+  const y = window.scrollY; CH.splice(0).forEach((c) => { try { c.destroy(); } catch (e) {} }); v.innerHTML = ""; window.T21.render(v, window.__t21H); window.scrollTo(0, y);
+  if (S.scroll) { S.scroll = false; const el = document.getElementById("t21-detail"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }
+}
+async function tick() { const a = document.activeElement; if (a && (a.tagName === "SELECT" || a.tagName === "INPUT")) return; await load(); rerender(); }
 setInterval(tick, 60000);
-const fmtMad = (iso) => { try { return new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Madrid", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(iso)) + " Madrid"; } catch (e) { return iso; } };
+const MAD = (() => { try { return new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Madrid", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false }); } catch (e) { return null; } })();
+const fmtMad = (iso) => { try { return MAD.format(new Date(iso)).replace(",", "") + " Madrid"; } catch (e) { return iso; } };
+const hm = (iso) => { try { return new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Madrid", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(iso)); } catch (e) { return iso; } };
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const mlabel = (m) => MONTHS[parseInt(m.slice(5), 10) - 1] + " " + m.slice(0, 4);
+const dlabel = (d) => d.slice(8) + " " + MONTHS[parseInt(d.slice(5, 7), 10) - 1] + " " + d.slice(0, 4);
+const money = (x, dec) => (x == null || isNaN(x) ? "–" : (x < 0 ? "−€" : "€") + Math.abs(x).toLocaleString("en-US", { minimumFractionDigits: dec == null ? 0 : dec, maximumFractionDigits: dec == null ? 0 : dec }));
+const smoney = (x, dec) => (x == null ? "–" : (x >= 0 ? "+" : "−") + money(Math.abs(x), dec).replace("−", ""));
+const tn = (x) => (x > 0 ? "pos" : x < 0 ? "neg" : "mut");
+const COLORS = ["#3fb97a", "#5aa9ff", "#e3b341", "#b48cff", "#ff8fa3"];
+const liveOf = (id) => (D && D.live && D.live.strategies ? D.live.strategies.find((x) => x.id === id) : null);
+function verdict(x, top) {
+  if (x.c01.total > 0 && top) return x.rank === 1 ? ["★ Most promising", "ok"] : ["Profitable after costs (shaky)", "warn"];
+  if (x.c0.total > 0) return ["Profit only at zero cost", "warn"];
+  return ["No edge", "bad"];
+}
+const vlabel = (x) => verdict(x, x.c01.total > 0);
+const vshort = (x) => (x.c01.total > 0 ? (x.rank === 1 ? ["★ Promising", "ok"] : ["Shaky profit", "warn"]) : x.c0.total > 0 ? ["Zero-cost only", "warn"] : ["No edge", "bad"]);
+function liveDates() {
+  const set = new Set(); if (D.live && D.live.session_day) set.add(D.live.session_day);
+  Object.values(D.live_trades || {}).forEach((a) => a.forEach((t) => set.add(t[1].slice(0, 10)))); return Array.from(set).sort();
+}
+// cumulative live (zero-cost practice) P&L per live day for a strategy: array aligned with liveDates()
+function liveCum(id, ld) {
+  const tr = (D.live_trades || {})[id] || [], by = {}; tr.forEach((t) => { const d = t[1].slice(0, 10); by[d] = (by[d] || 0) + t[6]; });
+  let a = 0; return ld.map((d) => (a += by[d] || 0, Math.round(a * 100) / 100));
+}
+const vline = { id: "t21vline", afterDatasetsDraw(c, a, o) {
+  if (o == null || o.idx == null) return; const x = c.scales.x.getPixelForValue(o.idx), { top, bottom } = c.chartArea, g = c.ctx; g.save(); g.strokeStyle = "rgba(227,179,65,.8)"; g.setLineDash([5, 4]); g.lineWidth = 1.5; g.beginPath(); g.moveTo(x, top); g.lineTo(x, bottom); g.stroke(); g.setLineDash([]); g.fillStyle = "#e3b341"; g.font = "12px system-ui,sans-serif";
+  const t = o.text, w = g.measureText(t).width, tx = x - w - 6 > c.chartArea.left ? x - w - 6 : x + 6; g.fillText(t, tx, top + 14); g.restore(); } };
+function mkChart(box, series, live, ld, H, big) {
+  const cv = document.createElement("canvas"); box.appendChild(cv); const days = BT.days, n = days.length, labels = days.concat(ld.filter((d) => d > days[n - 1]));
+  const ds = [];
+  series.forEach((s) => { ds.push({ label: s.label, data: s.data.concat(new Array(labels.length - n).fill(null)), borderColor: s.color, backgroundColor: s.color, borderWidth: s.w || 1.8, pointRadius: 0, tension: 0.1, spanGaps: false, order: 2 }); });
+  live.forEach((l) => { const arr = new Array(labels.length).fill(null); arr[n - 1] = l.anchor; ld.forEach((d, i) => { const k = labels.indexOf(d); if (k >= 0) arr[k] = Math.round((l.anchor + l.cum[i]) * 10) / 10; }); ds.push({ label: l.label, data: arr, borderColor: l.color, backgroundColor: l.color, borderWidth: 3.2, borderDash: [], pointRadius: (c) => (c.dataIndex >= n ? 5 : 0), pointHoverRadius: 6, tension: 0, spanGaps: true, order: 1 }); });
+  const muted = "#8d9aab";
+  const c = new Chart(cv, { type: "line", data: { labels, datasets: ds }, plugins: [vline], options: { responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
+    plugins: { legend: { labels: { color: muted, boxWidth: 14, usePointStyle: false } }, t21vline: { idx: n, text: "Live practice from " + dlabel((ld[0] || "2026-10-29")).slice(0, 6) }, tooltip: { callbacks: { title: (it) => dlabel(it[0].label), label: (it) => (it.parsed.y == null ? null : it.dataset.label + ": " + smoney(it.parsed.y, 0)) } } },
+    scales: { x: { ticks: { color: muted, maxTicksLimit: 7, autoSkip: true, maxRotation: 0, callback(v) { const l = this.getLabelForValue(v); return MONTHS[parseInt(l.slice(5, 7), 10) - 1] + " " + l.slice(2, 4); } }, grid: { color: "rgba(255,255,255,.05)" } }, y: { ticks: { color: muted, callback: (x) => money(x, 0) }, grid: { color: "rgba(255,255,255,.07)" } } } } });
+  CH.push(c); return c;
+}
+function chartBox(h, ht) { return h("div", { class: "chartbox", style: "height:" + (ht || 300) + "px" }); }
+
 function render(v, H) {
-  window.__t21H = H; const { h, table, card, metric, callout, pill, fmtEur0, sgn, tone } = H;
-  if (!D) { v.appendChild(card("Nasdaq 21", null, h("p", null, err ? "Could not load Nasdaq 21 data: " + err : "Loading…"))); if (!err) load().then(rerender); else load().then(rerender); return; }
-  const L = D.live, B = D.backtest;
-  const eur = (x) => (x == null ? "–" : (x < 0 ? "−€" : "€") + Math.abs(x).toFixed(2));
-  const eur0 = (x) => (x == null ? "–" : fmtEur0(x));
-  v.appendChild(card("Nasdaq-100: 21 strategies from well-known traders, funds and papers",
-    "From now on the desk trades only the Nasdaq-100. Each of the 21 strategies below is a different published rule set (Crabel, Raschke, Williams, Connors, Bollinger, Carter, Fisher, the Turtles, academic papers…) with its own €500 practice account, €25 risk per trade, 60-minute maximum hold, zero cost and no daily trade cap. Practice only, nothing here places a real order.",
-    B ? callout((function () { const n0 = B.strategies.filter((x) => x.c0.total > 0).length, n1 = B.strategies.filter((x) => x.c01.total > 0).length, pr = B.strategies.filter((x) => x.verdict === "promising"); return "Honest read: in the 2024–2026 backtest " + n0 + " of the 21 make money at zero cost, only " + n1 + " still do at 0.01% per side, and " + (pr.length ? pr.length + " (" + pr.map((x) => x.id + " " + x.name).join("; ") + ") is profitable in all three years with a direction signal that beats coin-flips" : "none is clearly robust") + ". Because 21 rules were tested, one apparent winner is partly expected by luck. The live practice below is the real test."; })(), "info") : null));
-  // live summary
-  if (L) {
-    const T = L.totals, sts = L.strategies.slice();
-    v.appendChild(card("Live practice leaderboard", "Updated every practice check (about every 5 minutes while the US market is open, 14:30–21:00 Madrid time). Last 1-minute bar used: " + (L.last_bar_madrid || "–") + " Madrid. Live data is QQQ (the Nasdaq-100 ETF) as a stand-in for the NAS100 CFD. Trades before " + fmtMad(L.started_utc) + " were computed from already completed minute bars of 29 Oct (marked 'replayed' in the files).",
-      h("div", { class: "grid g4" }, metric(String(T.trades_today), "Trades today", T.open_positions + " open now"), metric(sgn(T.pnl_today), "All 21 accounts today", null, tone(T.pnl_today)),
-        metric(sgn(T.pnl), "All 21 accounts since start", T.in_profit + " of 21 above €500", tone(T.pnl)), metric(String(T.trades), "Closed trades since start", "zero cost, no daily cap")),
-      (function () {
-        const keyf = { id: (x) => x.id, balance: (x) => x.balance, today: (x) => x.pnl_today, trades: (x) => x.trades, tt: (x) => x.trades_today, win: (x) => (x.win_rate == null ? -1 : x.win_rate) };
-        sts.sort((a, b) => { const f = keyf[S.sort] || keyf.balance; const x = f(a), y = f(b); return (x < y ? -1 : x > y ? 1 : 0) * S.dir; });
-        const hd = (label, k) => h("button", { class: "lnk", onclick: () => { if (S.sort === k) S.dir = -S.dir; else { S.sort = k; S.dir = -1; } rerender(); }, style: "background:none;border:0;color:inherit;font:inherit;cursor:pointer;padding:0" }, label + (S.sort === k ? (S.dir < 0 ? " ▼" : " ▲") : ""));
-        const rows = sts.map((x, i) => [String(i + 1), h("span", null, h("b", null, x.id), " ", x.name), { t: eur(x.balance), cls: tone(x.balance - 500) }, { t: sgn(x.pnl), cls: tone(x.pnl) }, String(x.trades), String(x.trades_today), x.win_rate == null ? "–" : x.win_rate + "%", { t: sgn(x.pnl_today), cls: tone(x.pnl_today) },
-          x.open ? h("span", null, pill(x.open.side, x.open.side === "LONG" ? "ok" : "bad"), " " + x.open.entry + " ", h("span", { class: tone(x.open.open_pnl) }, sgn(x.open.open_pnl))) : h("span", { class: "mut" }, "flat")]);
-        const t = table(["#", h("span", null, hd("Strategy", "id")), h("span", null, hd("Balance", "balance")), "Since start", h("span", null, hd("Trades", "trades")), h("span", null, hd("Today", "tt")), h("span", null, hd("Win rate", "win")), h("span", null, hd("P&L today", "today")), "Open trade"], rows, { num: [2, 3, 4, 5, 6, 7] });
-        return t;
-      })(),
-      h("p", { class: "cap", style: "margin-top:8px" }, "Click a column title to sort. 'Balance' is each strategy's own €500 account; a strategy that has not traded yet stays at €500.")));
-    const rec = []; sts.forEach((x) => x.recent.slice(0, 2).forEach((r) => rec.push([x.id, r.time, r.side, r.entry + " → " + r.exit + " (" + r.why + ")", { t: sgn(r.pnl), cls: tone(r.pnl) }])));
-    if (rec.length) v.appendChild(card("Latest closed trades", null, table(["Strategy", "Closed (Madrid)", "Side", "Entry → exit", "Result"], rec.slice(0, 24), { num: [4] })));
-  } else v.appendChild(card("Live practice leaderboard", null, h("p", { class: "mut" }, "The live accounts have not produced data yet.")));
-  // backtest
-  if (B) {
-    const V = { promising: ["Promising", "ok"], marginal: ["Marginal", "warn"], "zero-cost only": ["Zero-cost only", "warn"], "no edge": ["No edge", "bad"] };
-    const bs = B.strategies.slice(); const kf = { rank: (x) => x.rank, id: (x) => x.id, trades: (x) => x.trades, win: (x) => x.c0.win, c0: (x) => x.c0.total, c01: (x) => x.c01.total, dd: (x) => x.c0.mdd };
-    bs.sort((a, b) => { const f = kf[S.bt] || kf.rank, x = f(a), y = f(b); return (x < y ? -1 : x > y ? 1 : 0) * S.btdir; });
-    const bh = (label, k, first) => h("button", { onclick: () => { if (S.bt === k) S.btdir = -S.btdir; else { S.bt = k; S.btdir = first || -1; } rerender(); }, style: "background:none;border:0;color:inherit;font:inherit;cursor:pointer;padding:0" }, label + (S.bt === k ? (S.btdir < 0 ? " ▼" : " ▲") : ""));
-    const yrs = (o) => Object.values(o).map((y) => (y < 0 ? "−" : "+") + Math.round(Math.abs(y))).join(" / ");
-    v.appendChild(card("Backtest, " + B.period + " (" + B.sessions + " sessions)", "Dukascopy Nasdaq-100 CFD 1-minute bars, regular US hours. €500 start, €25 risk per trade. Zero cost is the practice setting; 0.01% per side is shown for honesty (a hypothetical cost, not measured at a broker). Same code as the live accounts. The rules were fixed before the results were seen, with one parameter set each.",
-      table([bh("Rank", "rank", 1), h("span", null, bh("Strategy", "id", 1)), bh("Trades", "trades"), "A day", bh("Win rate", "win"), bh("Profit, zero cost", "c0"), bh("Profit, 0.01%", "c01"), bh("Worst drop", "dd"), "2024 / 2025 / 2026 at 0.01%", "Real €500 account at 0.01%", "Verdict"],
-        bs.map((x) => [String(x.rank), h("span", null, h("b", null, x.id), " ", x.name), String(x.trades), x.per_day.toFixed(2), x.c0.win + "%", { t: eur0(x.c0.total), cls: tone(x.c0.total) }, { t: eur0(x.c01.total), cls: tone(x.c01.total) }, eur0(x.c0.mdd), yrs(x.c01.years), x.c01.blown ? pill("below €50 from " + x.c01.blown, "bad") : h("span", { class: "mut" }, "survives"), pill(V[x.verdict][0], V[x.verdict][1])]), { num: [0, 2, 3, 4, 5, 6, 7] }),
-      callout("Every trade risks a fixed €25 here, so the numbers are comparable. Worst drop = biggest fall from a peak of the zero-cost profit curve. Strategies that trade several times a day are hit hard by costs: 0.01% per side is about €1–2 per trade. The long/short split in the table further down shows which side made the money.")));
-    const rows2 = B.strategies.slice().sort((a, b) => a.id < b.id ? -1 : 1).map((x) => [x.id, h("span", null, h("b", null, x.name), h("div", { class: "mut", style: "font-size:12.5px" }, x.attr)), h("a", { href: x.link, target: "_blank", rel: "noopener" }, x.who), eur0(x.c0.long_pnl) + " / " + eur0(x.c0.short_pnl), x.null ? (x.null.p_c0 * 100).toFixed(0) + "%" : "–"]);
-    v.appendChild(card("Who each strategy comes from", "Where a famous name is only loosely attached, it says so. Click the source link to read the original. 'Long / short' is the zero-cost profit of each side. 'Luck of direction' is the share of 150 re-runs with a coin-flip direction on each signal (same timing, stop and target) that did at least as well at zero cost; under 5% means the direction signal adds something.",
-      table(["ID", "Strategy and how direct the attribution is", "Source", "Long / short profit", "Luck of direction"], rows2, { num: [3, 4] })));
-    const det = h("div", { class: "rules" });
-    B.strategies.slice().sort((a, b) => a.id < b.id ? -1 : 1).forEach((x) => det.appendChild(h("details", { style: "margin:6px 0" }, h("summary", { style: "cursor:pointer" }, h("b", null, x.id + " "), x.name), h("p", { style: "margin:6px 0 2px" }, x.rules), h("p", { class: "mut", style: "margin:2px 0" }, "Exits: " + Object.entries(x.exits).map(([k, p]) => p + "% " + k).join(", ") + ". Average stop " + x.avg_stop_pct + "% of price."))));
-    v.appendChild(card("Exact rules", B.common, det));
+  window.__t21H = H; const { h, table, card, metric, callout, pill } = H;
+  if (!D) { v.appendChild(card("Nasdaq 21", null, h("p", null, err ? "Could not load Nasdaq 21 data: " + err : "Loading…"))); load().then(rerender); return; }
+  if (!BT && !btErr) loadBT().then(rerender);
+  const L = D.live || {}, B = D.backtest; if (!B) { v.appendChild(card("Nasdaq 21", null, h("p", null, "No backtest data yet."))); return; }
+  const strategies = B.strategies.slice().sort((a, b) => a.rank - b.rank), top = strategies.filter((x) => x.c01.total > 0), byId = {}; strategies.forEach((x) => (byId[x.id] = x));
+  if (!byId[S.sel]) S.sel = strategies[0].id;
+  const ld = liveDates(); const sel = (id) => { S.sel = id; S.month = null; S.page = 0; S.scroll = true; rerender(); };
+  // ---- header
+  const lastBarAge = L.last_bar_utc ? (Date.now() - Date.parse(L.last_bar_utc)) / 60000 : null, feed = lastBarAge != null && lastBarAge < 15;
+  const totT = (L.strategies || []).reduce((s, x) => s + x.trades_today, 0), totP = (L.strategies || []).reduce((s, x) => s + x.pnl_today, 0), nOpen = (L.strategies || []).filter((x) => x.open).length;
+  v.appendChild(h("section", { class: "card topcard" }, h("h2", null, "Nasdaq-100: 21 strategies, best ones first"),
+    h("div", { class: "mini" },
+      h("div", null, h("b", { class: feed ? "pos" : "warn" }, feed ? "● Live" : "Market closed"), h("span", { class: "mut" }, " · last price " + (L.last_bar_madrid || "–").replace(/^\d+ \w+ /, "") + " Madrid")),
+      h("div", null, h("b", null, totT + " trades today"), h("span", { class: "mut" }, " · " + nOpen + " open")),
+      h("div", null, h("b", { class: tn(totP) }, smoney(totP, 2) + " today"), h("span", { class: "mut" }, " (all 21, zero cost)"))),
+    h("p", { class: "cap", style: "margin:8px 0 0" }, "Practice only: 21 published rule sets, each with its own €500 account and €25 risk per trade. No broker, no real order.")));
+  // ---- best strategies
+  const best = h("div", { class: "bestgrid" });
+  top.forEach((x, i) => {
+    const l = liveOf(x.id), vv = vlabel(x), yrs = x.c01.years, neg = Object.keys(yrs).filter((k) => yrs[k] < 0);
+    const status = l ? (l.open ? h("div", { class: "livestrip on" }, h("span", { class: "ldot" }), h("b", null, "TRADING NOW: " + l.open.side), " from " + l.open.entry + ", open P&L ", h("b", { class: tn(l.open.open_pnl) }, smoney(l.open.open_pnl, 2))) : h("div", { class: "livestrip" }, h("span", { class: "ldot off" }), h("span", null, feed ? "Watching the market, no open trade right now" : "Market closed, no open trade"))) : h("div", { class: "livestrip" }, "no live data yet");
+    const last = l && l.recent && l.recent[0];
+    best.appendChild(h("div", { class: "bcard" + (x.rank === 1 ? " first" : ""), onclick: () => sel(x.id) },
+      h("div", { class: "bhead" }, h("span", { class: "brank" }, "#" + (i + 1)), pill(vv[0], vv[1])),
+      h("div", { class: "bname" }, h("b", null, x.id), " ", x.name),
+      h("div", { class: "bwho mut" }, x.who.split(",")[0].split("(")[0]),
+      h("div", { class: "bnums" },
+        h("div", null, h("div", { class: "bv " + tn(x.c01.total) }, smoney(x.c01.total)), h("div", { class: "bl" }, "backtest profit at 0.01% cost")),
+        h("div", null, h("div", { class: "bv " + tn(x.c0.total) }, smoney(x.c0.total)), h("div", { class: "bl" }, "at zero cost"))),
+      h("div", { class: "bsmall" }, x.trades + " trades · " + x.c0.win + "% wins · worst drop " + money(x.c0.mdd)),
+      h("div", { class: "bsmall" }, "Per year at 0.01%: ", Object.keys(yrs).map((k) => h("span", { class: tn(yrs[k]) }, k + " " + smoney(yrs[k]) + "  "))),
+      x.id === "S11" ? h("div", { class: "bwarn" }, "All its profit is from short trades; best of 21 tested, so some luck.") : (neg.length ? h("div", { class: "bwarn" }, "Lost money in " + neg.join(", ") + " at 0.01% cost.") : null),
+      h("div", { class: "blive" }, h("div", { class: "bl2" }, "Live practice"), status,
+        h("div", { class: "bsmall2" }, l ? h("span", null, "Balance ", h("b", { class: tn((l.balance || 500) - 500) }, money(l.balance, 2)), " · today ", h("b", { class: tn(l.pnl_today) }, smoney(l.pnl_today, 2)), " · trades today " + l.trades_today) : ""),
+        last ? h("div", { class: "bsmall2 mut" }, "Last trade " + last.time + ": " + last.side + " " + last.entry + " → " + last.exit + " ", h("b", { class: tn(last.pnl) }, smoney(last.pnl, 2))) : h("div", { class: "bsmall2 mut" }, "No trade closed yet today")),
+      h("div", { class: "btap" }, "Tap for chart, rules and trades ›")));
+  });
+  v.appendChild(h("section", { class: "card hl" }, h("h2", null, "★ Best strategies (the " + top.length + " profitable after costs)"), h("p", { class: "cap" }, "Ranked by backtest profit at 0.01% cost per side, January 2024 to 28 October 2026. All of them trade live in practice right now."), best));
+  v.appendChild(callout("Honest summary: only " + top.length + " of the 21 made money in the backtest once a small trading cost (0.01% per side) is counted. S11 is the best, but all its profit came from short trades and it is the best of 21 tested, so part of it may be luck. The live accounts trade at zero cost, so their balances look better than a real account would. The next weeks of live trading are the real test."));
+  // ---- combined chart
+  const ccard = h("section", { class: "card" }, h("h2", null, "Top " + top.length + " together, January 2024 to today"),
+    h("p", { class: "cap" }, "Cumulative profit in € (fixed €25 risk per trade). The thick line after the dashed marker is the live practice (zero cost) continuing from the backtest."),
+    h("div", { class: "row" }, H.h("div", { class: "seg", role: "group" }, [["c01", "With 0.01% cost"], ["c0", "Zero cost"]].map(([k, l]) => h("button", { type: "button", "aria-pressed": String(S.cmb === k), onclick: () => { S.cmb = k; rerender(); } }, l)))));
+  const cb = chartBox(h, 320); ccard.appendChild(cb);
+  if (BT) { try { mkChart(cb, top.map((x, i) => ({ label: x.id, data: BT.s[x.id][S.cmb], color: COLORS[i % 5] })), top.map((x, i) => ({ label: x.id + " live", anchor: BT.s[x.id][S.cmb][BT.days.length - 1], cum: liveCum(x.id, ld), color: COLORS[i % 5] })), ld, H); } catch (e) { cb.textContent = "Chart error: " + e.message; } }
+  else cb.appendChild(h("p", { class: "mut" }, btErr ? "Could not load the backtest curves: " + btErr : "Loading the chart…"));
+  v.appendChild(ccard);
+  // ---- all 21
+  const rows = strategies.map((x) => {
+    const l = liveOf(x.id), vv = vlabel(x), loser = x.c01.total <= 0, t = top.indexOf(x) >= 0;
+    const tr = h("tr", { class: "clk" + (loser ? " loser" : "") + (S.sel === x.id ? " selrow" : ""), onclick: () => sel(x.id) },
+      h("td", { class: "n" }, String(x.rank)), h("td", { class: "namecell" }, h("b", null, x.id), " ", x.name, h("div", null, pill(vshort(x)[0], vshort(x)[1]))),
+      h("td", { class: "n " + tn(x.c01.total) }, smoney(x.c01.total)), h("td", { class: "n " + tn(x.c0.total) }, smoney(x.c0.total)), h("td", { class: "n" }, String(x.trades)), h("td", { class: "n" }, x.c0.win + "%"), h("td", { class: "n" }, money(x.c0.mdd)),
+      h("td", { class: "n" }, l ? money(l.balance, 2) : "–"), h("td", { class: "n " + tn(l ? l.pnl_today : 0) }, l ? smoney(l.pnl_today, 2) : "–"), h("td", null, l && l.open ? pill(l.open.side + " " + smoney(l.open.open_pnl, 2), l.open.open_pnl >= 0 ? "ok" : "bad") : h("span", { class: "mut" }, "flat")));
+    return tr;
+  });
+  const th = ["#", "Strategy", "Backtest, 0.01% cost", "Backtest, zero cost", "Trades", "Win rate", "Worst drop", "Live balance", "Live today", "Open"];
+  const tbl = h("div", { class: "tw" }, h("table", { class: "t21t" }, h("thead", null, h("tr", null, th.map((c, i) => h("th", { class: [0, 2, 3, 4, 5, 6, 7, 8].includes(i) ? "n" : "" }, c)))), h("tbody", null, rows)));
+  v.appendChild(card("All 21 strategies, best to worst", "Backtest January 2024 – 28 October 2026. Tap a row to see its chart, rules, source and every trade. Strategies marked 'No edge' lose money even before costs or are not worth trading.", tbl));
+  // ---- detail
+  const x = byId[S.sel], l = liveOf(x.id), vv = vlabel(x), isTop = top.indexOf(x) >= 0;
+  const det = h("section", { class: "card hl2", id: "t21-detail" },
+    h("div", { class: "row", style: "justify-content:space-between" }, h("h2", { style: "margin:0" }, x.id + " · " + x.name), pill(vv[0], vv[1])),
+    h("div", { class: "row" }, h("label", { class: "f" }, "Pick another strategy", h("select", { onchange: (e) => sel(e.target.value) }, strategies.map((s) => h("option", { value: s.id, selected: s.id === x.id }, "#" + s.rank + "  " + s.id + "  " + s.name.slice(0, 48)))))),
+    x.id === "S11" ? callout("All of S11's profit came from short trades (longs lost money), and it is the best of 21 rules tested on the same data, so some of the result may be luck.") : (!isTop ? callout(x.c0.total > 0 ? "Makes money only if trading costs nothing. With 0.01% per side it loses." : "Loses money in the backtest even at zero cost.", "") : null),
+    h("div", { class: "grid g4" },
+      metric(smoney(x.c01.total), "Backtest profit, 0.01% cost", x.trades + " trades (" + x.per_day.toFixed(2) + " a day)", tn(x.c01.total)),
+      metric(smoney(x.c0.total), "Backtest profit, zero cost", "win rate " + x.c0.win + "%, profit factor " + (x.c0.pf == null ? "–" : x.c0.pf), tn(x.c0.total)),
+      metric(money(x.c0.mdd), "Worst drop (zero cost)", "at 0.01%: " + money(x.c01.mdd)),
+      metric(l ? money(l.balance, 2) : "–", "Live practice balance", l ? (l.trades + (l.trades === 1 ? " trade" : " trades") + " since 29 Oct, today " + smoney(l.pnl_today, 2)) : "", l ? tn(l.balance - 500) : ""))
+  );
+  const lb = l && l.open ? h("div", { class: "livestrip on" }, h("span", { class: "ldot" }), h("b", null, "Open now: " + l.open.side), " from " + l.open.entry + ", open P&L ", h("b", { class: tn(l.open.open_pnl) }, smoney(l.open.open_pnl, 2))) : h("div", { class: "livestrip" }, h("span", { class: "ldot off" }), "No open trade right now");
+  det.appendChild(lb);
+  det.appendChild(h("h3", { style: "margin-top:14px" }, "Profit since January 2024"));
+  det.appendChild(h("p", { class: "cap" }, "Cumulative € at a fixed €25 risk per trade. Blue: zero cost. Amber: 0.01% cost per side. Green: live practice (zero cost) continuing from 29 October."));
+  const cb2 = chartBox(h, 300); det.appendChild(cb2);
+  if (BT) { try { const s = BT.s[x.id]; mkChart(cb2, [{ label: "Backtest, zero cost", data: s.c0, color: "#5aa9ff" }, { label: "Backtest, 0.01% cost", data: s.c01, color: "#e3b341" }], [{ label: "Live practice", anchor: s.c0[BT.days.length - 1], cum: liveCum(x.id, ld), color: "#3fb97a" }], ld, H); } catch (e) { cb2.textContent = "Chart error: " + e.message; } }
+  else cb2.appendChild(h("p", { class: "mut" }, btErr ? "Could not load the backtest curves: " + btErr : "Loading the chart…"));
+  // per-year
+  const ys = Object.keys(x.c0.years);
+  det.appendChild(h("h3", { style: "margin-top:14px" }, "Per year"));
+  det.appendChild(table(["Year", "Profit, zero cost", "Profit, 0.01% cost"], ys.map((y) => [y === "2026" ? "2026 (to 28 Oct)" : y, { t: smoney(x.c0.years[y]), cls: tn(x.c0.years[y]) }, { t: smoney(x.c01.years[y]), cls: tn(x.c01.years[y]) }]), { num: [1, 2] }));
+  det.appendChild(H.h("dl", { class: "props" }, ...[["Rules", x.rules], ["Source", h("span", null, h("a", { href: x.link, target: "_blank", rel: "noopener" }, x.who), h("div", { class: "mut small" }, x.attr))],
+    ["Exits", Object.entries(x.exits).map(([k, p]) => p + "% " + k).join(", ") + ". Average stop " + x.avg_stop_pct + "% of price."], ["Long / short profit", "Zero cost: longs " + smoney(x.c0.long_pnl) + ", shorts " + smoney(x.c0.short_pnl)],
+    ["Luck check", x.null ? (x.null.p_c0 * 100).toFixed(0) + "% of 150 coin-flip-direction re-runs did as well at zero cost (under 5% means the direction signal adds something)." : "–"]].flatMap(([a, b]) => [h("dt", null, a), h("dd", null, b)])));
+  det.appendChild(h("p", { class: "cap" }, B.common));
+  // trades
+  det.appendChild(h("h3", { style: "margin-top:14px" }, "Every trade, back to January 2024"));
+  const tcard = h("div", null); det.appendChild(tcard);
+  const liveTr = ((D.live_trades || {})[x.id] || []).slice().sort((a, b) => (a[0] < b[0] ? 1 : -1));
+  if (!TRS[x.id] && !TRERR[x.id]) { tcard.appendChild(h("p", { class: "mut" }, "Loading trades…")); loadTR(x.id).then(rerender); }
+  else if (TRERR[x.id]) tcard.appendChild(h("p", { class: "neg" }, "Could not load the trade list: " + TRERR[x.id]));
+  else {
+    const all = TRS[x.id].trades, why = TRS[x.id].why, months = {}; all.forEach((t) => { const m = t[0].slice(0, 7); const o = months[m] || (months[m] = { n: 0, p0: 0, p1: 0 }); o.n++; o.p0 += t[6]; o.p1 += t[7]; });
+    const ml = Object.keys(months).sort().reverse(); if (S.month == null || (S.month !== "live" && S.month !== "all" && !months[S.month])) S.month = liveTr.length ? "live" : ml[0];
+    const opts = []; if (liveTr.length) opts.push(["live", "Live practice since 29 Oct (" + liveTr.length + (liveTr.length === 1 ? " trade)" : " trades)")]); ml.forEach((m) => opts.push([m, mlabel(m) + " · " + months[m].n + " trades · " + smoney(months[m].p1) + " at 0.01%"])); opts.push(["all", "All backtest trades (" + all.length + ")"]);
+    const idx = opts.findIndex((o) => o[0] === S.month);
+    tcard.appendChild(h("div", { class: "row" }, h("button", { class: "b", type: "button", disabled: idx <= 0, onclick: () => { S.month = opts[idx - 1][0]; S.page = 0; rerender(); } }, "‹ Newer"),
+      h("label", { class: "f", style: "flex:1;min-width:200px" }, "Month", h("select", { onchange: (e) => { S.month = e.target.value; S.page = 0; rerender(); } }, opts.map((o) => h("option", { value: o[0], selected: o[0] === S.month }, o[1])))),
+      h("button", { class: "b", type: "button", disabled: idx >= opts.length - 1, onclick: () => { S.month = opts[idx + 1][0]; S.page = 0; rerender(); } }, "Older ›")));
+    if (S.month === "live") {
+      tcard.appendChild(table(["Date", "In (Madrid)", "Out", "Side", "In price", "Out price", "Exit", "P&L (zero cost)"], liveTr.map((t) => [t[0].slice(0, 10), hm(t[0].slice(0, 16) + ":00Z"), hm(t[1].slice(0, 16) + ":00Z"), { t: t[2] > 0 ? "Long" : "Short", cls: t[2] > 0 ? "pos" : "neg" }, String(t[3]), String(t[4]), t[5] + (t[7] === "replayed" ? " (replayed)" : ""), { t: smoney(t[6], 2), cls: tn(t[6]) }]), { num: [4, 5, 7] }));
+      tcard.appendChild(h("p", { class: "cap" }, "Live practice prices are QQQ (the Nasdaq-100 ETF), about 1/35 of the index level. 'Replayed' = the signal came before the practice was switched on, replayed from that day's completed minute bars."));
+    } else {
+      let list = S.month === "all" ? all : all.filter((t) => t[0].slice(0, 7) === S.month); const np = Math.max(1, Math.ceil(list.length / PAGE)); if (S.page >= np) S.page = np - 1; const pg = list.slice(S.page * PAGE, S.page * PAGE + PAGE);
+      const tot = list.reduce((a, t) => [a[0] + t[6], a[1] + t[7]], [0, 0]);
+      tcard.appendChild(h("p", { class: "small" }, list.length + " trades · total " + smoney(tot[0]) + " at zero cost, " + smoney(tot[1]) + " at 0.01% · page " + (S.page + 1) + " of " + np));
+      tcard.appendChild(table(["Date", "In (Madrid)", "Side", "In price", "Out price", "Exit", "P&L, zero cost", "P&L, 0.01%"], pg.map((t) => [t[0], t[1], { t: t[2] > 0 ? "Long" : "Short", cls: t[2] > 0 ? "pos" : "neg" }, t[3].toFixed(1), t[4].toFixed(1), why[t[5]], { t: smoney(t[6], 2), cls: tn(t[6]) }, { t: smoney(t[7], 2), cls: tn(t[7]) }]), { num: [3, 4, 6, 7] }));
+      if (np > 1) tcard.appendChild(h("div", { class: "row" }, h("button", { class: "b", type: "button", disabled: S.page === 0, onclick: () => { S.page--; rerender(); } }, "‹ Previous page"), h("button", { class: "b", type: "button", disabled: S.page >= np - 1, onclick: () => { S.page++; rerender(); } }, "Next page ›")));
+      tcard.appendChild(h("p", { class: "cap" }, "Backtest prices are the Dukascopy Nasdaq-100 CFD. P&L uses a fixed €25 risk per trade."));
+    }
   }
+  v.appendChild(det);
   v.appendChild(h("p", { class: "mut", style: "font-size:12.5px" }, "Data file generated " + fmtMad(D.generated_utc) + ". Practice only: simulated accounts, no broker, no real order is ever placed."));
 }
 window.T21 = { render, load, refresh: tick };

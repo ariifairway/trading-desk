@@ -71,3 +71,46 @@ dl.props dd{margin:0}
 .rules{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr))}
 .rules section{background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:12px}
 @media(max-width:640px){h1{font-size:22px}.view{padding:10px}section.card{padding:12px}.metric .v{font-size:19px}th,td{padding:6px 8px;font-size:13px}}
+
+/* Nasdaq 21 landing page */
+.tabs button:first-child{color:var(--amber);font-weight:650}
+.tabs button:first-child[aria-selected=true]{color:var(--text)}
+@media(max-width:640px){.tabs{flex-wrap:wrap;overflow-x:visible;padding:6px 8px;gap:3px}.tabs button{padding:7px 10px;font-size:14px}}
+section.card.hl{border-color:rgba(227,179,65,.55);background:linear-gradient(180deg,rgba(227,179,65,.08),var(--panel) 120px)}
+section.card.hl2{border-color:rgba(90,169,255,.5)}
+.bestgrid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr))}
+.bcard{background:var(--panel2);border:1px solid var(--border);border-radius:12px;padding:12px;cursor:pointer;display:flex;flex-direction:column;gap:6px;min-width:0}
+.bcard:hover{border-color:var(--blue)}
+.bcard.first{border-color:var(--amber);box-shadow:0 0 0 1px rgba(227,179,65,.4),0 0 18px rgba(227,179,65,.12);grid-column:1/-1}
+@media(min-width:900px){.bcard.first{grid-column:span 2}}
+.bhead{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.brank{font-size:20px;font-weight:700;color:var(--amber)}
+.bname{font-size:15.5px;line-height:1.3}
+.bwho{font-size:12.5px}
+.bnums{display:flex;gap:18px;flex-wrap:wrap;margin-top:4px}
+.bv{font-size:26px;font-weight:700;line-height:1.15}
+.bl{font-size:12px;color:var(--muted)}
+.bsmall{font-size:12.5px;color:var(--muted)}
+.bwarn{font-size:12.5px;color:var(--amber)}
+.blive{margin-top:6px;border-top:1px solid var(--border);padding-top:8px;display:flex;flex-direction:column;gap:5px}
+.bl2{font-size:11.5px;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)}
+.bsmall2{font-size:13.5px}
+.btap{font-size:12.5px;color:var(--blue);margin-top:auto;padding-top:4px}
+.livestrip{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13.5px;padding:6px 9px;border-radius:8px;background:var(--bg);border:1px solid var(--border)}
+.livestrip.on{border-color:rgba(63,185,122,.7);background:rgba(63,185,122,.12)}
+.ldot{width:10px;height:10px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:pulse 1.4s infinite}
+.ldot.off{background:var(--muted);box-shadow:none;animation:none}
+@keyframes pulse{50%{opacity:.35}}
+table.t21t td,table.t21t th{padding:7px 8px}
+tr.clk{cursor:pointer}
+tr.clk:hover td{background:rgba(90,169,255,.07)}
+tr.loser td{opacity:.62}
+tr.selrow td{background:rgba(90,169,255,.14);opacity:1}
+.chartbox canvas{touch-action:pan-y}
+.ldot{flex:0 0 10px}
+.mini{display:flex;flex-wrap:wrap;gap:4px 18px;font-size:14.5px}
+section.card.topcard{padding:12px 16px}
+.pill{white-space:nowrap}
+td.namecell{min-width:150px;max-width:230px}td.namecell .pill{margin-top:4px;font-size:11.5px}
+table.t21t th{white-space:normal;min-width:64px}
+@media(max-width:640px){.top .sub{display:none}.top{padding:12px 12px 4px}h1{font-size:20px}.tabs button{padding:6px 9px;font-size:13.5px}.status{font-size:12px;padding:4px 10px}}
