@@ -3,9 +3,9 @@
 // Data: t21.json (live + backtest summary, data branch on GitHub with local fallback), t21_bt.json (daily backtest curves) and t21_tr_Sxx.json (backtest trades; loaded on demand).
 (function () {
 "use strict";
-const VER = "20261029c", RAW = "https://raw.githubusercontent.com/ariifairway/trading-desk/data/";
+const VER = "20261029d", RAW = "https://raw.githubusercontent.com/ariifairway/trading-desk/data/";
 const LOCAL = location.hostname === "127.0.0.1" || location.hostname === "localhost";
-let D = null, err = null, BT = null, btErr = null; const TRS = {}, TRERR = {}; const CH = [];
+let D = null, err = null, BT = null, btErr = null, FU = null, FUerr = null, FC = null, FCerr = null; const TRS = {}, TRERR = {}; const CH = [];
 const S = { sel: "S11", cmb: "c01", month: null, page: 0, scroll: false };
 const PAGE = 40;
 async function getJ(urls) { let e; for (const u of urls) { try { const r = await fetch(u, { cache: "no-store" }); if (!r.ok) throw new Error("HTTP " + r.status); return await r.json(); } catch (x) { e = x; } } throw e; }
@@ -13,6 +13,8 @@ async function load() {
   const t = Math.floor(Date.now() / 60000);
   try { const j = await getJ(LOCAL ? ["data/t21.json?t=" + t] : [RAW + "t21.json?t=" + t, "data/t21.json?t=" + t]); if (!(D && Date.parse(j.generated_utc) < Date.parse(D.generated_utc))) D = j; err = null; } catch (x) { err = String(x && x.message || x); }
 }
+async function loadFU() { const t = Math.floor(Date.now() / 60000); try { const j = await getJ(LOCAL ? ["data/t21fut.json?t=" + t] : [RAW + "t21fut.json?t=" + t, "data/t21fut.json?t=" + t]); if (!(FU && Date.parse(j.generated_utc) < Date.parse(FU.generated_utc))) FU = j; FUerr = null; } catch (x) { FUerr = String(x && x.message || x); } }
+async function loadFC() { if (FC) return; try { FC = await getJ(["data/equity_curves_fixed.json?v=" + VER, RAW + "equity_curves_fixed.json?v=" + VER]); FCerr = null; } catch (x) { FCerr = String(x && x.message || x); } }
 async function loadBT() { if (BT) return; try { BT = await getJ(["data/t21_bt.json?v=" + VER, RAW + "t21_bt.json?v=" + VER]); btErr = null; } catch (x) { btErr = String(x && x.message || x); } }
 async function loadTR(id) { if (TRS[id]) return; try { TRS[id] = await getJ(["data/t21_tr_" + id + ".json?v=" + VER, RAW + "t21_tr_" + id + ".json?v=" + VER]); delete TRERR[id]; } catch (x) { TRERR[id] = String(x && x.message || x); } }
 let busy = false;
@@ -21,7 +23,7 @@ function rerender() {
   const y = window.scrollY; CH.splice(0).forEach((c) => { try { c.destroy(); } catch (e) {} }); v.innerHTML = ""; window.T21.render(v, window.__t21H); window.scrollTo(0, y);
   if (S.scroll) { S.scroll = false; const el = document.getElementById("t21-detail"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }
 }
-async function tick() { const a = document.activeElement; if (a && (a.tagName === "SELECT" || a.tagName === "INPUT")) return; await load(); rerender(); }
+async function tick() { const a = document.activeElement; if (a && (a.tagName === "SELECT" || a.tagName === "INPUT")) return; await Promise.all([load(), loadFU()]); rerender(); }
 setInterval(tick, 60000);
 const MAD = (() => { try { return new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Madrid", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false }); } catch (e) { return null; } })();
 const fmtMad = (iso) => { try { return MAD.format(new Date(iso)).replace(",", "") + " Madrid"; } catch (e) { return iso; } };
@@ -70,12 +72,68 @@ function render(v, H) {
   window.__t21H = H; const { h, table, card, metric, callout, pill } = H;
   if (!D) { v.appendChild(card("Nasdaq 21", null, h("p", null, err ? "Could not load Nasdaq 21 data: " + err : "Loading…"))); load().then(rerender); return; }
   if (!BT && !btErr) loadBT().then(rerender);
+  if (!FU && !FUerr) loadFU().then(rerender);
   const L = D.live || {}, B = D.backtest; if (!B) { v.appendChild(card("Nasdaq 21", null, h("p", null, "No backtest data yet."))); return; }
   const strategies = B.strategies.slice().sort((a, b) => a.rank - b.rank), top = strategies.filter((x) => x.c01.total > 0), byId = {}; strategies.forEach((x) => (byId[x.id] = x));
   if (!byId[S.sel]) S.sel = strategies[0].id;
   const ld = liveDates(); const sel = (id) => { S.sel = id; S.month = null; S.page = 0; S.scroll = true; rerender(); };
+  const feed = (D.live && D.live.last_bar_utc) ? (Date.now() - Date.parse(D.live.last_bar_utc)) / 60000 < 15 : false;
+  // ---- HEADLINE: EUR5,000 Micro Nasdaq futures (MNQ) practice set
+  try {
+    if (FU && FU.strategies) {
+      const FS = FU.strategies, M = FU.model || {}, T = FU.totals || {}, fl = (x) => x.live, started = FU.started_utc;
+      const bestIds = (FU.ranking_2018_26 || []).slice(0, 5).map((r) => r.id), fsById = {}; FS.forEach((x) => (fsById[x.id] = x));
+      const rankOf = {}; (FU.ranking_2018_26 || []).forEach((r) => (rankOf[r.id] = r.rank));
+      const liveBal = FS.reduce((a, x) => a + (fl(x) ? fl(x).balance : 5000), 0), livePnl = FS.reduce((a, x) => a + (fl(x) ? fl(x).pnl : 0), 0), todayP = FS.reduce((a, x) => a + (fl(x) ? fl(x).pnl_today : 0), 0), nTr = FS.reduce((a, x) => a + (fl(x) ? fl(x).trades : 0), 0), nOp = FS.filter((x) => fl(x) && fl(x).open && !fl(x).open.skipped_too_big).length, nSk = FU.skipped_total || 0;
+      const fcard = h("section", { class: "card hl", id: "t21-fut" }, h("h2", null, "★ Main practice: €5,000 Micro Nasdaq futures (MNQ)"),
+        h("p", { class: "cap" }, "21 strategies, each with its own €5,000 practice account. Risk " + (M.risk_pct_of_equity || 5) + "% of the account per trade, whole MNQ contracts ($" + (M.usd_per_point || 2) + " a point), costs included: " + (M.slippage_ticks || 1) + " tick slippage and $" + (M.commission_usd_per_side || 0.94) + " per side. " + (started ? "Live since " + fmtMad(started) + ". " : "Not started yet. ") + "Simulation only, no broker, no real order."),
+        h("div", { class: "grid g4" },
+          metric(smoney(livePnl, 2), "Live P&L, all 21", started ? "since " + fmtMad(started) : "waiting for the first run", tn(livePnl)),
+          metric(smoney(todayP, 2), "Today, all 21", nTr + " trades so far, " + nOp + " open", tn(todayP)),
+          metric(money(liveBal, 0), "Total of the 21 accounts", "21 × €5,000 = €105,000 at the start"),
+          metric(String(nSk), "Trades skipped", "one MNQ would risk more than the cap")));
+      const bgrid = h("div", { class: "bestgrid", style: "margin-top:12px" });
+      bestIds.forEach((id, i) => {
+        const x = fsById[id]; if (!x) return; const l = fl(x), b = x.backtest, a = b.p2024_26, c = b.p2018_23, op = l && l.open && !l.open.skipped_too_big ? l.open : null;
+        const strip = !l ? h("div", { class: "livestrip" }, "no live data yet") : op ? h("div", { class: "livestrip on" }, h("span", { class: "ldot" }), h("b", null, "TRADING NOW: " + op.side + " " + op.contracts + " MNQ"), " from " + op.entry_pts + ", open ", h("b", { class: tn(op.open_pnl_eur) }, smoney(op.open_pnl_eur, 2))) : h("div", { class: "livestrip" }, h("span", { class: "ldot off" }), h("span", null, feed ? "Watching the market, no open trade" : "Market closed, no open trade"));
+        bgrid.appendChild(h("div", { class: "bcard" + (i === 0 ? " first" : "") },
+          h("div", { class: "bhead" }, h("span", { class: "brank" }, "#" + (i + 1)), pill(i === 0 ? "★ Best on futures" : "Profitable in both periods", i === 0 ? "ok" : "warn")),
+          h("div", { class: "bname" }, h("b", null, x.id), " ", x.name), 
+          h("div", { class: "bnums" },
+            h("div", null, h("div", { class: "bv " + tn(a.net_eur) }, smoney(a.net_eur)), h("div", { class: "bl" }, "backtest 2024–26")),
+            h("div", null, h("div", { class: "bv " + tn(c.net_eur) }, smoney(c.net_eur)), h("div", { class: "bl" }, "backtest 2018–23"))),
+          h("div", { class: "bsmall" }, a.trades + " + " + c.trades + " trades · win " + a.win_rate + "% / " + c.win_rate + "% · worst drop " + money(a.max_drawdown_eur) + " / " + money(c.max_drawdown_eur)),
+          h("div", { class: "bsmall" }, "2024–26 per year: ", Object.keys(a.per_year).map((k) => h("span", { class: tn(a.per_year[k]) }, k + " " + smoney(a.per_year[k]) + "  "))),
+          h("div", { class: "blive" }, h("div", { class: "bl2" }, "Live €5,000 account"), strip,
+            h("div", { class: "bsmall2" }, l ? h("span", null, "Balance ", h("b", { class: tn(l.balance - 5000) }, money(l.balance, 2)), " · today ", h("b", { class: tn(l.pnl_today) }, smoney(l.pnl_today, 2)), " · trades today " + l.trades_today) : ""))));
+      });
+      fcard.appendChild(bgrid);
+      // equity chart 2018 -> today
+      fcard.appendChild(h("h3", { style: "margin-top:14px" }, "The 5 best on futures, January 2018 to today"));
+      fcard.appendChild(h("p", { class: "cap" }, "Daily balance from €5,000 (simulated backtest, risk fixed at 5% of the starting €5,000, 1 tick slippage, $0.94 per side). The 2018–23 and 2024–26 runs are joined at 1 Jan 2024."));
+      const fcb = chartBox(h, 300); fcard.appendChild(fcb);
+      if (!FC && !FCerr) loadFC().then(rerender);
+      if (FC) { try {
+        const cv = document.createElement("canvas"); fcb.appendChild(cv); const muted = "#8d9aab";
+        const ds = bestIds.map((id, i) => ({ label: id, data: FC.series[id], borderColor: COLORS[i % 5], backgroundColor: COLORS[i % 5], borderWidth: i === 0 ? 2.8 : 1.6, pointRadius: 0, tension: 0.1 }));
+        CH.push(new Chart(cv, { type: "line", data: { labels: FC.dates, datasets: ds }, options: { responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
+          plugins: { legend: { labels: { color: muted, boxWidth: 14 } }, tooltip: { callbacks: { title: (it) => dlabel(it[0].label), label: (it) => it.dataset.label + ": " + money(it.parsed.y, 0) } } },
+          scales: { x: { ticks: { color: muted, maxTicksLimit: 7, autoSkip: true, maxRotation: 0, callback(v) { const l = this.getLabelForValue(v); return MONTHS[parseInt(l.slice(5, 7), 10) - 1] + " " + l.slice(2, 4); } }, grid: { color: "rgba(255,255,255,.05)" } }, y: { ticks: { color: muted, callback: (x) => money(x, 0) }, grid: { color: "rgba(255,255,255,.07)" } } } } }));
+      } catch (e) { fcb.textContent = "Chart error: " + e.message; } }
+      else fcb.appendChild(h("p", { class: "mut" }, FCerr ? "Could not load the curves: " + FCerr : "Loading the chart…"));
+      // all 21
+      const frows = FS.slice().sort((a, b) => (rankOf[a.id] || 99) - (rankOf[b.id] || 99)).map((x) => { const l = fl(x), b = x.backtest, a = b.p2024_26, c = b.p2018_23, both = a && c && a.net_eur > 0 && c.net_eur > 0;
+        return [h("span", null, h("b", null, x.id), " ", x.name.slice(0, 30)), { t: l ? money(l.balance, 2) + (l.open && !l.open.skipped_too_big ? " ●" : "") : "–", cls: tn(l ? l.balance - 5000 : 0) }, { t: l ? smoney(l.pnl_today, 2) : "–", cls: tn(l ? l.pnl_today : 0) }, { t: a ? smoney(a.net_eur) : "–", cls: tn(a ? a.net_eur : 0) }, { t: c ? smoney(c.net_eur) : "–", cls: tn(c ? c.net_eur : 0) }, { t: a ? money(a.max_drawdown_eur) : "–" }, { t: both ? "yes" : "no", cls: both ? "pos" : "mut" }]; });
+      fcard.appendChild(h("h3", { style: "margin-top:14px" }, "All 21 on futures, best first"));
+      fcard.appendChild(h("div", { class: "tw" }, h("table", { class: "t21t" }, h("thead", null, h("tr", null, ["Strategy", "Live balance", "Live today", "2024–26", "2018–23", "Worst drop 24–26", "Both +"].map((c, i) => h("th", { class: i ? "n" : "" }, c)))),
+        h("tbody", null, frows.map((r) => h("tr", null, r.map((c, i) => (i === 0 ? h("td", { class: "namecell" }, c) : h("td", { class: "n " + (c.cls || "") }, c.t)))))))));
+      fcard.appendChild(h("p", { class: "cap" }, "Backtest net € = after slippage and commission, whole contracts, risk 5% of the starting €5,000 (a strategy that loses more than the account stops trading). Only 5 of the 21 make money in both periods. S11 is the best of 21 tested on the same history (2018–23 was never used to pick it); treat the numbers as an upper bound until live practice shows the same. The NAS100 index data stands in for the futures price. ● = open trade right now."));
+      v.appendChild(fcard);
+      v.appendChild(h("h2", { style: "margin:6px 2px 0;font-size:17px" }, "Secondary comparisons: the €500 CFD sets"));
+    } else if (FUerr) v.appendChild(card("Futures practice", null, h("p", { class: "mut" }, "Could not load the futures data: " + FUerr)));
+  } catch (e) { v.appendChild(h("p", { class: "mut" }, "Futures section error: " + e.message)); }
   // ---- header
-  const lastBarAge = L.last_bar_utc ? (Date.now() - Date.parse(L.last_bar_utc)) / 60000 : null, feed = lastBarAge != null && lastBarAge < 15;
+  const lastBarAge = L.last_bar_utc ? (Date.now() - Date.parse(L.last_bar_utc)) / 60000 : null;
   const totT = (L.strategies || []).reduce((s, x) => s + x.trades_today, 0), totP = (L.strategies || []).reduce((s, x) => s + x.pnl_today, 0), nOpen = (L.strategies || []).filter((x) => x.open).length;
   v.appendChild(h("section", { class: "card topcard" }, h("h2", null, "Nasdaq-100: 21 strategies, best ones first"),
     h("div", { class: "mini" },
@@ -209,5 +267,5 @@ function render(v, H) {
   v.appendChild(h("p", { class: "mut", style: "font-size:12.5px" }, "Data file generated " + fmtMad(D.generated_utc) + ". Practice only: simulated accounts, no broker, no real order is ever placed."));
 }
 window.T21 = { render, load, refresh: tick };
-load().then(rerender);
+Promise.all([load(), loadFU()]).then(rerender);
 })();
