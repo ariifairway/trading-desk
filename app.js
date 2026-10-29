@@ -343,7 +343,7 @@ async function loadLive() {
 function updateStatus() {
   const el = document.getElementById("status"), tx = document.getElementById("status-text");
   if (!LIVE) { tx.textContent = liveErr ? "Data unavailable: " + liveErr : "Loading…"; el.className = "status stale"; return; }
-  const age = Math.round((Date.now() - Date.parse(LIVE.generated_utc)) / 1000), stale = age > 180;
+  const age = Math.round((Date.now() - Date.parse(LIVE.generated_utc)) / 1000), stale = age > 600;
   tx.textContent = "Last updated " + madTime(Date.parse(LIVE.generated_utc), true) + " Madrid · " + (age < 90 ? age + " s" : Math.round(age / 60) + " min") + " ago" + (stale ? " – data may be stale" : "") + (liveErr ? " (refresh failing)" : "");
   el.className = "status " + (stale || liveErr ? "stale" : "ok");
 }
