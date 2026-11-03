@@ -82,6 +82,7 @@ function render(v, H) {
   if (!byId[S.sel]) S.sel = strategies[0].id;
   const ld = liveDates(); const sel = (id) => { S.sel = id; S.month = null; S.page = 0; S.scroll = true; rerender(); };
   const feed = (D.live && D.live.last_bar_utc) ? (Date.now() - Date.parse(D.live.last_bar_utc)) / 60000 < 15 : false;
+  v.appendChild(h("div", { class: "callout info", style: "margin:0" }, "New: ", h("a", { href: "#s11bt", style: "color:var(--blue)" }, "S11 on a €5,000 account vs MSCI ACWI IMI, 2012 to now"), " — side-by-side backtest, play/pause replay of every trade, full trade table, and how accurate the backtest really is."));
   // ---- HEADLINE: EUR5,000 Micro Nasdaq futures (MNQ) practice set
   try {
     if (FU && FU.strategies) {
